@@ -1,0 +1,2274 @@
+/* Polaris Studio */
+
+/* 起動ボタン（画面上部の設定の行の右端）。Gradio の行の子要素の指定より強くするため id を付ける */
+#quicksettings > .ps-launch {
+    flex: none;
+    align-self: center;
+    width: auto;
+    min-width: 0;
+    max-width: 200px;
+    margin-left: auto;
+    padding: 8px 16px;
+    border: 1px solid var(--button-primary-border-color);
+    border-radius: 8px;
+    background: var(--button-primary-background-fill);
+    color: var(--button-primary-text-color);
+    font-weight: 600;
+    cursor: pointer;
+    white-space: nowrap;
+}
+
+#quicksettings > .ps-launch:hover {
+    background: var(--button-primary-background-fill-hover);
+}
+
+/* img2img の上の帯（インペイントの保存先がポラスタのカット案になっている間だけ出す） */
+#tab_img2img > .ps-i2i-banner {
+    flex: none;
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+    min-width: 0;
+    margin-bottom: 8px;
+    padding: 6px 10px;
+    border: 1px solid var(--color-accent);
+    border-radius: 8px;
+    background: color-mix(in srgb, var(--color-accent) 15%, transparent);
+    color: var(--body-text-color);
+}
+
+#tab_img2img > .ps-i2i-banner.ps-off {
+    display: none;
+}
+
+#tab_img2img > .ps-i2i-banner .ps-i2i-text {
+    flex: 1;
+    min-width: 0;
+    font-weight: 600;
+}
+
+#tab_img2img > .ps-i2i-banner button {
+    flex: none;
+    width: auto;
+    min-width: 0;
+    padding: 4px 12px;
+    border: 1px solid var(--border-color-primary);
+    border-radius: 6px;
+    background: var(--button-secondary-background-fill);
+    color: var(--body-text-color);
+    cursor: pointer;
+}
+
+#tab_img2img > .ps-i2i-banner button.ps-i2i-back {
+    border-color: var(--button-primary-border-color);
+    background: var(--button-primary-background-fill);
+    color: var(--button-primary-text-color);
+}
+
+/* 共通の部品 */
+.mtm-btn {
+    flex: none;
+    padding: 4px 10px;
+    border: 1px solid var(--border-color-primary);
+    border-radius: 6px;
+    background: var(--button-secondary-background-fill);
+    color: var(--body-text-color);
+    cursor: pointer;
+    white-space: nowrap;
+}
+
+.mtm-btn:hover {
+    background: var(--button-secondary-background-fill-hover);
+}
+
+.mtm-primary {
+    background: var(--button-primary-background-fill);
+    color: var(--button-primary-text-color);
+    border-color: var(--button-primary-border-color);
+}
+
+.mtm-primary:hover {
+    background: var(--button-primary-background-fill-hover);
+}
+
+.mtm-btn.mtm-active {
+    background: var(--button-secondary-background-fill-hover);
+    border-color: var(--color-accent);
+}
+
+.mtm-form-actions {
+    display: flex;
+    gap: 6px;
+    justify-content: flex-end;
+    align-items: center;
+}
+
+.mtm-hint {
+    margin-right: auto;
+    font-size: 12px;
+    color: var(--body-text-color-subdued);
+}
+
+.mtm-icon {
+    padding: 2px 6px;
+    border: none;
+    border-radius: 4px;
+    background: transparent;
+    color: var(--body-text-color);
+    cursor: pointer;
+}
+
+.mtm-icon:hover {
+    background: var(--button-secondary-background-fill-hover);
+}
+
+.mtm-icon:disabled {
+    opacity: 0.5;
+    cursor: default;
+}
+
+.mtm-empty {
+    padding: 16px;
+    text-align: center;
+    color: var(--body-text-color-subdued);
+}
+
+/* カテゴリ名の横の印（排他・ネガティブ専用） */
+.mtm-excl-badge {
+    display: inline-block;
+    margin-left: 4px;
+    padding: 0 5px;
+    border-radius: 8px;
+    background: var(--color-accent-soft);
+    color: var(--body-text-color);
+    font-size: 10px;
+    font-weight: 600;
+    line-height: 15px;
+    vertical-align: 1px;
+}
+
+.mtm-neg-badge {
+    display: inline-block;
+    margin-left: 4px;
+    padding: 0 5px;
+    border-radius: 8px;
+    background: rgba(220, 38, 38, 0.2);
+    color: var(--body-text-color);
+    font-size: 10px;
+    font-weight: 600;
+    line-height: 15px;
+    vertical-align: 1px;
+}
+
+/* ドラッグで並べ替え */
+.mtm-handle {
+    flex: none;
+    padding: 0 2px;
+    color: var(--body-text-color-subdued);
+    cursor: grab;
+    user-select: none;
+    opacity: 0.5;
+}
+
+.mtm-dragging {
+    opacity: 0.4;
+}
+
+.mtm-drop-before {
+    box-shadow: inset 0 2px 0 var(--color-accent);
+}
+
+.mtm-drop-after {
+    box-shadow: inset 0 -2px 0 var(--color-accent);
+}
+
+/* ---------- 全画面モード ---------- */
+
+body.mtm-fs-open {
+    overflow: hidden;
+}
+
+#mtm-fs {
+    position: fixed;
+    inset: 0;
+    z-index: 10001;
+    background: rgba(0, 0, 0, 0.55);
+    color: var(--body-text-color);
+    font-size: 14px;
+    /* キー操作を受けるためにフォーカスを置くが、枠は出さない */
+    outline: none;
+}
+
+#mtm-fs.mtm-hidden,
+#mtm-fs .mtm-hidden {
+    display: none;
+}
+
+.mtm-fs-window {
+    position: absolute;
+    inset: 16px;
+    display: flex;
+    flex-direction: column;
+    border: 1px solid var(--border-color-primary);
+    border-radius: 10px;
+    background: var(--background-fill-primary);
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
+    overflow: hidden;
+    /* ウィンドウは重ねて使うので、中の z-index が上に重なった別のウィンドウへ突き抜けないようにする */
+    isolation: isolate;
+}
+
+.mtm-fs-bar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border-color-primary);
+}
+
+.mtm-fs-title {
+    font-size: 16px;
+    font-weight: 600;
+}
+
+.mtm-fs-target {
+    padding: 1px 8px;
+    border: 1px solid var(--border-color-primary);
+    border-radius: 10px;
+    font-size: 12px;
+    color: var(--body-text-color-subdued);
+}
+
+#mtm-fs input,
+#mtm-fs textarea,
+#mtm-fs select {
+    box-sizing: border-box;
+    padding: 5px 8px;
+    border: 1px solid var(--border-color-primary);
+    border-radius: 6px;
+    background: var(--input-background-fill);
+    color: var(--body-text-color);
+    font: inherit;
+}
+
+.mtm-fs-spacer {
+    flex: 1;
+}
+
+/* 画像のドロップ */
+.mtm-fs-drop {
+    position: absolute;
+    inset: 8px;
+    z-index: 5;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 3px dashed var(--color-accent);
+    border-radius: 10px;
+    background: rgba(0, 0, 0, 0.35);
+    color: #fff;
+    font-size: 18px;
+    font-weight: 600;
+    pointer-events: none;
+}
+
+.mtm-fs-notice {
+    font-size: 12px;
+    color: var(--body-text-color-subdued);
+}
+
+.mtm-fs-notice.mtm-fs-notice-warn {
+    color: #d97706;
+}
+
+.mtm-fs-dirty {
+    font-size: 12px;
+    color: #d97706;
+}
+
+.mtm-fs-saved {
+    font-size: 12px;
+    color: #16a34a;
+}
+
+.mtm-fs-param {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 12px;
+    color: var(--body-text-color-subdued);
+}
+
+#mtm-fs .mtm-fs-param input {
+    width: 64px;
+    padding: 4px 6px;
+}
+
+#mtm-fs .mtm-fs-param input.mtm-fs-seed,
+#mtm-fs .mtm-fs-param input.mtm-fs-subseed {
+    /* 10 桁のシードと数値欄の上下ボタンが収まる幅 */
+    width: 136px;
+}
+
+.mtm-fs-param .mtm-icon {
+    padding: 2px 4px;
+}
+
+/* CUI 風の進捗表示 */
+.mtm-fs-progress {
+    flex: 0 1 auto;
+    min-width: 0;
+    padding: 3px 8px;
+    border: 1px solid var(--border-color-primary);
+    border-radius: 6px;
+    background: var(--background-fill-secondary);
+    font-family: var(--font-mono), monospace;
+    font-size: 12px;
+    white-space: pre;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.mtm-fs-progress.mtm-fs-progress-done {
+    color: var(--body-text-color-subdued);
+}
+
+/* 全画面モードの登録ダイアログ */
+.mtm-dialog-backdrop {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0, 0, 0, 0.35);
+}
+
+.mtm-dialog {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    width: min(520px, calc(100vw - 32px));
+    padding: 16px;
+    border: 1px solid var(--border-color-primary);
+    border-radius: 10px;
+    background: var(--background-fill-primary);
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
+}
+
+.mtm-dialog-title {
+    font-size: 15px;
+    font-weight: 600;
+}
+
+.mtm-dialog label {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    font-size: 12px;
+    color: var(--body-text-color-subdued);
+}
+
+#mtm-fs .mtm-dialog textarea,
+#mtm-fs .mtm-dialog input,
+#mtm-fs .mtm-dialog select {
+    width: 100%;
+}
+
+.mtm-dialog label.mtm-check {
+    flex-direction: row;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
+    color: var(--body-text-color);
+    cursor: pointer;
+}
+
+#mtm-fs .mtm-dialog input[type="checkbox"] {
+    width: auto;
+    margin: 0;
+}
+
+/* 明暗どちらのテーマでも読めるよう、赤い文字ではなく赤い地に白い文字にする */
+.mtm-btn.mtm-danger {
+    border-color: #dc2626;
+    background: #dc2626;
+    color: #fff;
+}
+
+.mtm-btn.mtm-danger:hover {
+    border-color: #b91c1c;
+    background: #b91c1c;
+}
+
+#mtm-fs input[type="checkbox"] {
+    width: auto;
+    padding: 0;
+    margin: 0;
+}
+
+.mtm-btn:disabled {
+    opacity: 0.5;
+    cursor: default;
+}
+
+/* ---------- プロジェクト管理 ---------- */
+
+#mtm-fs .ps-off {
+    display: none;
+}
+
+.ps-grid {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    grid-auto-rows: max-content;
+    align-content: start;
+    gap: 16px;
+    padding: 16px;
+}
+
+.ps-grid > .mtm-empty {
+    grid-column: 1 / -1;
+}
+
+.ps-tile {
+    display: flex;
+    flex-direction: column;
+    padding: 0;
+    border: 1px solid var(--border-color-primary);
+    border-radius: 8px;
+    background: var(--background-fill-secondary);
+    color: var(--body-text-color);
+    font: inherit;
+    text-align: left;
+    overflow: hidden;
+    cursor: pointer;
+}
+
+.ps-tile:hover {
+    border-color: var(--color-accent);
+    box-shadow: 0 0 0 1px var(--color-accent);
+}
+
+.ps-cover {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    aspect-ratio: 3 / 4;
+    font-size: 12px;
+}
+
+.ps-cover.ps-no-cover {
+    background: var(--background-fill-primary);
+    color: var(--body-text-color-subdued);
+}
+
+.ps-tile-title {
+    padding: 8px 10px;
+    font-weight: 600;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+#mtm-fs .ps-project-title {
+    width: 280px;
+    max-width: 100%;
+    font-size: 15px;
+    font-weight: 600;
+}
+
+/* シーンは上から下へ時系列に並べ、左の線でつなぐ */
+.ps-scenes {
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
+    padding: 16px;
+}
+
+.ps-scene {
+    display: flex;
+    gap: 14px;
+    align-items: stretch;
+    min-width: 0;
+}
+
+.ps-scene.ps-drop {
+    box-shadow: inset 0 2px 0 var(--color-accent);
+}
+
+.ps-rail {
+    position: relative;
+    flex: none;
+    width: 170px;
+    padding-bottom: 18px;
+}
+
+.ps-rail::after {
+    content: "";
+    position: absolute;
+    top: 30px;
+    bottom: 0;
+    left: 50%;
+    border-left: 2px solid var(--border-color-primary);
+}
+
+.ps-scene:last-child .ps-rail::after {
+    bottom: 18px;
+}
+
+.ps-scene-name {
+    position: relative;
+    z-index: 1;
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    padding: 2px 4px;
+    border: 1px solid var(--border-color-primary);
+    border-radius: 8px;
+    background: var(--background-fill-primary);
+}
+
+#mtm-fs .ps-scene-input {
+    flex: 1;
+    min-width: 0;
+    padding: 2px 4px;
+    border-color: transparent;
+    background: transparent;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+#mtm-fs .ps-scene-input:hover,
+#mtm-fs .ps-scene-input:focus {
+    border-color: var(--border-color-primary);
+}
+
+.ps-grip {
+    flex: none;
+    padding: 0 3px;
+    color: var(--body-text-color-subdued);
+    cursor: grab;
+    user-select: none;
+}
+
+.ps-scene-body {
+    flex: 1;
+    min-width: 0;
+}
+
+.ps-cuts {
+    display: flex;
+    gap: 12px;
+    align-items: flex-start;
+    min-width: 200px;
+    padding-bottom: 18px;
+}
+
+/* 並べきれないカット案の山（left・z-index は JS で付ける） */
+/* 並べきれない要素の山（カット案のカード、編集画面のサムネイル。left・z-index は JS で付ける） */
+.ps-stack {
+    position: relative;
+    flex: none;
+}
+
+.ps-stacked {
+    position: absolute !important;
+    top: 0;
+    box-shadow: -3px 0 8px rgba(0, 0, 0, 0.3);
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.ps-stacked.ps-active {
+    z-index: 1000 !important;
+    transform: translateY(-10px);
+    border-color: var(--color-accent);
+    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.45);
+}
+
+/* サムネイル一覧を開いているカット案。山の中にあっても前に出しておく */
+.ps-cut.ps-open {
+    border-color: var(--color-accent);
+    box-shadow: 0 0 0 2px var(--color-accent);
+}
+
+.ps-cut.ps-stacked.ps-open {
+    z-index: 999 !important;
+}
+
+/* カット案の下に開くサムネイル一覧 */
+.ps-gallery-view.ps-gallery-inline {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    margin: 0 0 22px;
+    border: 1px solid var(--color-accent);
+    border-radius: 10px;
+    background: var(--background-fill-primary);
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.25);
+}
+
+/* 開いているカードを指す三角 */
+.ps-gallery-view.ps-gallery-inline::before {
+    content: "";
+    position: absolute;
+    top: -9px;
+    left: calc(var(--ps-arrow-x, 40px) - 9px);
+    width: 16px;
+    height: 16px;
+    border-top: 1px solid var(--color-accent);
+    border-left: 1px solid var(--color-accent);
+    background: var(--background-fill-primary);
+    transform: rotate(45deg);
+}
+
+.ps-gallery-view.ps-gallery-inline .ps-gallery {
+    flex: none;
+    max-height: 62vh;
+}
+
+.ps-gallery-view.ps-grow {
+    animation: ps-grow 0.22s ease-out;
+}
+
+@keyframes ps-grow {
+    from {
+        clip-path: inset(0 0 100% 0 round 10px);
+        transform: translateY(-6px);
+        opacity: 0.4;
+    }
+    to {
+        clip-path: inset(-20px -20px -40px -20px);
+        transform: none;
+        opacity: 1;
+    }
+}
+
+.ps-stack-count {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: -18px;
+    text-align: center;
+    font-size: 11px;
+    color: var(--body-text-color-subdued);
+}
+
+.ps-cuts.ps-drop .ps-add-cut {
+    border-color: var(--color-accent);
+}
+
+/* シーンの折りたたみ */
+.ps-scene-name .ps-scene-fold {
+    flex: none;
+    width: 20px;
+    padding: 0;
+    font-size: 10px;
+    line-height: 20px;
+    color: var(--body-text-color-subdued);
+}
+
+.ps-scene-folded {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-height: 30px;
+    margin-bottom: 18px;
+    padding: 0 12px;
+    border: 1px dashed var(--border-color-primary);
+    border-radius: 8px;
+    font-size: 12px;
+    cursor: pointer;
+    user-select: none;
+}
+
+.ps-scene-folded:hover,
+.ps-scene-folded.ps-drop {
+    border-color: var(--color-accent);
+}
+
+.ps-scene-folded-count {
+    font-weight: 600;
+}
+
+.ps-scene-folded-hint {
+    color: var(--body-text-color-subdued);
+}
+
+.ps-cut {
+    flex: none;
+    width: 250px;
+    border: 1px solid var(--border-color-primary);
+    border-radius: 8px;
+    background: var(--background-fill-secondary);
+    overflow: hidden;
+}
+
+.ps-cut.ps-drop {
+    box-shadow: 0 0 0 2px var(--color-accent);
+}
+
+.ps-key {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    aspect-ratio: 3 / 4;
+    font-size: 12px;
+}
+
+.ps-key.ps-none {
+    background: var(--background-fill-primary);
+    color: var(--body-text-color-subdued);
+}
+
+.ps-cut-title-row {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 6px 9px 7px;
+}
+
+.ps-cut-title {
+    flex: 1;
+    min-width: 0;
+    font-weight: 600;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* キー画像の上に浮かせるカット案のコマンド（2 行） */
+.ps-cut-bar {
+    position: absolute;
+    /* 山で前に出たカード（z-index 1000）より上に出す */
+    z-index: 2000;
+    box-sizing: border-box;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 6px;
+    border: 1px solid var(--border-color-primary);
+    border-radius: 8px;
+    /* 少しだけ透かして、下のキー画像がうっすら見えるようにする */
+    background: color-mix(in srgb, var(--background-fill-primary) 80%, transparent);
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+    animation: ps-cut-bar-in 0.12s ease-out;
+}
+
+@keyframes ps-cut-bar-in {
+    from {
+        opacity: 0;
+        transform: translateY(3px);
+    }
+}
+
+.ps-cut-bar-row {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+/* カードの幅に合わせて、ボタンで行を埋める */
+.ps-cut-bar .mtm-btn {
+    flex: 1 1 auto;
+    min-width: 0;
+    padding: 3px 4px;
+    font-size: 12px;
+}
+
+.ps-cut-bar .mtm-btn.ps-cut-bar-edit {
+    border-color: #15803d;
+    background: #16a34a;
+    color: #fff;
+}
+
+.ps-cut-bar .mtm-btn.ps-cut-bar-edit:hover {
+    background: #15803d;
+}
+
+.ps-add-cut {
+    flex: none;
+    width: 90px;
+    align-self: stretch;
+    min-height: 120px;
+    border: 1px dashed var(--border-color-primary);
+    border-radius: 8px;
+    background: transparent;
+    color: var(--body-text-color-subdued);
+    font: inherit;
+    font-size: 12px;
+    cursor: pointer;
+}
+
+.ps-add-cut:hover {
+    border-color: var(--color-accent);
+    color: var(--body-text-color);
+}
+
+.ps-add-scene {
+    margin-left: 184px;
+}
+
+/* ダイアログ */
+.ps-backdrop {
+    position: absolute;
+    inset: 0;
+    z-index: 20;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+    background: rgba(0, 0, 0, 0.45);
+}
+
+.ps-dialog {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    width: min(620px, 100%);
+    max-height: 100%;
+    box-sizing: border-box;
+    padding: 14px;
+    border-radius: 10px;
+    background: var(--background-fill-primary);
+}
+
+.ps-dialog-head {
+    font-weight: 600;
+}
+
+.ps-confirm-text {
+    font-size: 13px;
+    line-height: 1.5;
+}
+
+.ps-path {
+    padding: 6px 8px;
+    border: 1px solid var(--border-color-primary);
+    border-radius: 6px;
+    background: var(--background-fill-secondary);
+    font-family: var(--font-mono), monospace;
+    font-size: 12px;
+    word-break: break-all;
+    user-select: all;
+}
+
+.ps-field {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    font-size: 12px;
+    color: var(--body-text-color-subdued);
+}
+
+#mtm-fs .ps-field input,
+#mtm-fs .ps-field select {
+    width: 100%;
+}
+
+/* プロンプト編集 */
+#mtm-fs .ps-title-input {
+    width: 260px;
+    max-width: 100%;
+    font-weight: 600;
+}
+
+/* 上段：このカット案の画像 */
+.ps-ed-thumbs {
+    flex: none;
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    min-height: 128px;
+    padding: 8px 14px 18px;
+    border-bottom: 1px solid var(--border-color-primary);
+}
+
+.ps-ed-thumbs-empty {
+    align-self: center;
+    font-size: 12px;
+    color: var(--body-text-color-subdued);
+}
+
+.ps-ed-thumb {
+    position: relative;
+    flex: none;
+    width: 82px;
+    height: 110px;
+    padding: 0;
+    border: 1px solid var(--border-color-primary);
+    border-radius: 6px;
+    background: var(--background-fill-secondary);
+    overflow: hidden;
+    cursor: pointer;
+}
+
+.ps-ed-thumb:hover {
+    border-color: var(--color-accent);
+}
+
+.ps-ed-thumb img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+}
+
+.ps-ed-thumb .ps-thumb-mark {
+    left: 3px;
+    top: 3px;
+    padding: 0 4px;
+    font-size: 10px;
+}
+
+.ps-ed-thumb-no {
+    position: absolute;
+    right: 3px;
+    bottom: 3px;
+    padding: 0 4px;
+    border-radius: 6px;
+    background: rgba(0, 0, 0, 0.55);
+    color: #fff;
+    font-size: 10px;
+}
+
+.ps-ed-thumbs .ps-stack-count {
+    bottom: -16px;
+    font-size: 10px;
+}
+
+.ps-ed-thumbs .ps-stacked.ps-active {
+    transform: translateY(-4px);
+}
+
+/* 中段：左のカテゴリと右の追加したタグ */
+.ps-ed-picker {
+    flex: 1;
+    min-height: 0;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+    gap: 10px;
+    padding: 10px 14px;
+}
+
+.ps-ed-pane {
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    border: 1px solid var(--border-color-primary);
+    border-radius: 8px;
+    overflow: hidden;
+}
+
+.ps-ed-pane-head {
+    flex: none;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 8px;
+    background: var(--background-fill-secondary);
+    border-bottom: 1px solid var(--border-color-primary);
+}
+
+#mtm-fs .ps-ed-pane-head .mtm-fs-search {
+    flex: 1;
+    min-width: 0;
+    width: auto;
+}
+
+.ps-ed-pane-body {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+}
+
+.ps-ed-label {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--body-text-color-subdued);
+}
+
+.ps-ed-note {
+    font-size: 11px;
+    font-weight: normal;
+    color: var(--body-text-color-subdued);
+}
+
+.ps-ed-moves {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 8px;
+}
+
+.ps-ed-moves .mtm-btn:disabled {
+    opacity: 0.45;
+    cursor: default;
+}
+
+/* 左：カテゴリのアコーディオン */
+.ps-ed-cat-head {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 8px;
+    border-bottom: 1px solid var(--border-color-primary);
+    cursor: pointer;
+    user-select: none;
+}
+
+.ps-ed-cat-head:hover {
+    background: var(--background-fill-secondary);
+}
+
+.ps-ed-cat-head.ps-ed-neg {
+    background: rgba(220, 38, 38, 0.08);
+}
+
+/* 右で選んだタグのカテゴリ。見出しを少しの間光らせる */
+.ps-ed-cat.ps-ed-focus > .ps-ed-cat-head {
+    animation: ps-ed-focus 1.2s ease-out;
+}
+
+@keyframes ps-ed-focus {
+    from {
+        background: var(--color-accent-soft);
+        box-shadow: inset 3px 0 0 var(--color-accent);
+    }
+}
+
+.ps-ed-arrow {
+    flex: none;
+    width: 12px;
+    font-size: 10px;
+    color: var(--body-text-color-subdued);
+    transition: transform 0.15s;
+}
+
+.ps-ed-cat.ps-open .ps-ed-arrow {
+    transform: rotate(90deg);
+}
+
+.ps-ed-cat-name {
+    font-weight: 600;
+}
+
+.ps-ed-cat-count {
+    font-size: 11px;
+    color: var(--body-text-color-subdued);
+}
+
+.ps-ed-cat-count.ps-on {
+    color: var(--color-accent);
+    font-weight: 600;
+}
+
+.ps-ed-cat-body {
+    display: none;
+    padding: 2px 0 4px;
+    border-bottom: 1px solid var(--border-color-primary);
+}
+
+.ps-ed-cat.ps-open .ps-ed-cat-body {
+    display: block;
+}
+
+.ps-ed-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 3px 8px 3px 14px;
+    user-select: none;
+}
+
+.ps-ed-item:hover {
+    background: var(--background-fill-secondary);
+}
+
+.ps-ed-item.ps-sel,
+.ps-ed-pick.ps-sel {
+    background: var(--color-accent-soft);
+}
+
+.ps-ed-check {
+    flex: none;
+    width: 14px;
+    color: var(--color-accent);
+    font-weight: 700;
+}
+
+.ps-ed-item-main {
+    flex: 1;
+    min-width: 0;
+}
+
+.ps-ed-tags {
+    font-family: var(--font-mono), monospace;
+    font-size: 12px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.ps-ed-desc {
+    font-size: 11px;
+    color: var(--body-text-color-subdued);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.ps-ed-item-actions {
+    flex: none;
+    display: flex;
+    visibility: hidden;
+}
+
+.ps-ed-item:hover .ps-ed-item-actions {
+    visibility: visible;
+}
+
+.ps-ed-item-actions .mtm-icon {
+    padding: 1px 5px;
+    font-size: 12px;
+}
+
+.ps-ed-cat-head .mtm-handle,
+.ps-ed-item .mtm-handle,
+.ps-ed-pick .mtm-handle {
+    opacity: 0.35;
+}
+
+.ps-ed-cat-head:hover .mtm-handle,
+.ps-ed-item:hover .mtm-handle,
+.ps-ed-pick:hover .mtm-handle {
+    opacity: 1;
+}
+
+/* 右：追加したタグ */
+.ps-ed-pick {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 8px;
+    border-bottom: 1px solid var(--border-color-primary);
+    user-select: none;
+}
+
+.ps-ed-pick:hover {
+    background: var(--background-fill-secondary);
+}
+
+.ps-ed-pick .ps-ed-tags {
+    flex: 1;
+    min-width: 0;
+}
+
+.ps-ed-pick .ps-ed-desc {
+    flex: 0 1 auto;
+    max-width: 35%;
+}
+
+.ps-ed-pick-cat {
+    flex: none;
+    padding: 0 6px;
+    border-radius: 6px;
+    background: var(--color-accent-soft);
+    font-size: 11px;
+    white-space: nowrap;
+}
+
+.ps-ed-pick.ps-ed-neg .ps-ed-pick-cat {
+    background: rgba(220, 38, 38, 0.18);
+}
+
+.ps-ed-missing {
+    flex: none;
+    padding: 0 6px;
+    border: 1px solid #d97706;
+    border-radius: 6px;
+    color: #d97706;
+    font-size: 11px;
+    white-space: nowrap;
+}
+
+.ps-ed-pick.ps-missing .ps-ed-tags {
+    opacity: 0.55;
+}
+
+/* 下段：プロンプト欄とコマンド */
+.ps-ed-prompts {
+    flex: none;
+    display: grid;
+    gap: 8px;
+    padding: 0 14px 10px;
+}
+
+.ps-ed-prompts label {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+}
+
+#mtm-fs .ps-ed-prompts textarea {
+    width: 100%;
+    resize: vertical;
+    font-family: var(--font-mono), monospace;
+    font-size: 13px;
+}
+
+.ps-ed-commands {
+    flex: none;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 14px;
+    border-top: 1px solid var(--border-color-primary);
+    background: var(--background-fill-secondary);
+}
+
+.ps-diff-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    min-height: 0;
+    overflow-y: auto;
+}
+
+.ps-diff-label {
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.ps-diff-text {
+    padding: 6px 8px;
+    border: 1px solid var(--border-color-primary);
+    border-radius: 6px;
+    background: var(--background-fill-secondary);
+    font-family: var(--font-mono), monospace;
+    font-size: 12px;
+    word-break: break-all;
+}
+
+.ps-diff-added,
+.ps-diff-removed {
+    padding: 0 2px;
+    border-radius: 3px;
+}
+
+.ps-diff-added {
+    background: rgba(34, 197, 94, 0.35);
+}
+
+.ps-diff-removed {
+    background: rgba(239, 68, 68, 0.35);
+}
+
+.ps-history-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    min-height: 0;
+    overflow-y: auto;
+}
+
+.ps-history-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 2px 8px;
+    padding: 6px 8px;
+    border: 1px solid var(--border-color-primary);
+    border-radius: 6px;
+    background: var(--background-fill-secondary);
+}
+
+.ps-history-at {
+    font-size: 11px;
+    color: var(--body-text-color-subdued);
+}
+
+.ps-history-prompt {
+    grid-column: 1;
+    font-family: var(--font-mono), monospace;
+    font-size: 11px;
+    word-break: break-all;
+}
+
+.ps-history-row .mtm-btn {
+    grid-column: 2;
+    grid-row: 1 / 3;
+}
+
+/* 画像 */
+.ps-cover img,
+.ps-key img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+}
+
+.ps-cut {
+    cursor: pointer;
+}
+
+.ps-cut:hover {
+    border-color: var(--color-accent);
+}
+
+.ps-key-pick {
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    border: none;
+    border-radius: 6px;
+    background: rgba(0, 0, 0, 0.55);
+    color: #fff;
+    font-size: 14px;
+    cursor: pointer;
+}
+
+.ps-key-pick:hover {
+    background: rgba(0, 0, 0, 0.8);
+}
+
+.ps-count {
+    position: absolute;
+    right: 6px;
+    bottom: 6px;
+    padding: 0 7px;
+    border-radius: 9px;
+    background: rgba(0, 0, 0, 0.6);
+    color: #fff;
+    font-size: 11px;
+    line-height: 18px;
+}
+
+.ps-dialog-id {
+    font-size: 11px;
+    font-weight: 400;
+    color: var(--body-text-color-subdued);
+}
+
+.ps-thumbs {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+    gap: 8px;
+    min-height: 0;
+    overflow-y: auto;
+}
+
+.ps-thumbs > .mtm-empty {
+    grid-column: 1 / -1;
+}
+
+.ps-thumb {
+    position: relative;
+    aspect-ratio: 3 / 4;
+    padding: 0;
+    border: none;
+    border-radius: 6px;
+    background: var(--background-fill-secondary);
+    color: #fff;
+    font: inherit;
+    font-size: 11px;
+    overflow: hidden;
+    cursor: pointer;
+}
+
+.ps-thumb img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+}
+
+.ps-thumb.ps-on,
+.ps-thumb.ps-selected {
+    outline: 3px solid var(--color-accent);
+    outline-offset: -3px;
+}
+
+.ps-thumb-mark {
+    position: absolute;
+    left: 5px;
+    top: 5px;
+    padding: 0 6px;
+    border-radius: 8px;
+    background: var(--color-accent);
+    line-height: 17px;
+}
+
+.ps-thumb-check {
+    position: absolute;
+    right: 5px;
+    top: 5px;
+    width: 20px;
+    height: 20px;
+    border-radius: 4px;
+    background: rgba(0, 0, 0, 0.5);
+    line-height: 20px;
+    text-align: center;
+    font-size: 13px;
+}
+
+/* 見た目はそのままで、押せる範囲だけ周囲に広げる */
+.ps-thumb-check::before {
+    content: "";
+    position: absolute;
+    inset: -12px;
+}
+
+.ps-thumb-label {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    padding: 2px 6px;
+    background: rgba(0, 0, 0, 0.55);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.ps-gallery {
+    position: relative;
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    padding: 16px;
+    user-select: none;
+}
+
+.ps-drag-box {
+    position: absolute;
+    z-index: 2;
+    border: 1px solid var(--color-accent);
+    background: color-mix(in srgb, var(--color-accent) 18%, transparent);
+    pointer-events: none;
+}
+
+.ps-gallery-tools {
+    flex: none;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 16px;
+    border-bottom: 1px solid var(--border-color-primary);
+    font-size: 13px;
+}
+
+#mtm-fs .ps-gallery-search {
+    flex: 1;
+    min-width: 180px;
+    max-width: 420px;
+}
+
+.ps-gallery-tools label {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+}
+
+/* 単体ビューワー */
+.ps-viewer {
+    position: absolute;
+    inset: 0;
+    z-index: 30;
+    display: flex;
+    flex-direction: column;
+    background: rgba(0, 0, 0, 0.92);
+    color: #fff;
+}
+
+.ps-viewer-bar {
+    flex: none;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 12px;
+    font-size: 13px;
+}
+
+/* 表示中の画像がキー画像のときは、サムネイルの「キー」の印と同じ色にする */
+.mtm-btn.ps-view-key-on:disabled {
+    border-color: var(--color-accent);
+    background: var(--color-accent);
+    color: #fff;
+    opacity: 1;
+}
+
+.ps-viewer-size {
+    min-width: 52px;
+    text-align: center;
+}
+
+.ps-viewer-main {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+}
+
+.ps-viewer-center {
+    position: relative;
+    flex: 1;
+    min-width: 0;
+    display: flex;
+}
+
+.ps-viewer-stage {
+    flex: 1;
+    min-width: 0;
+    min-height: 0;
+    overflow: auto;
+    display: flex;
+}
+
+.ps-viewer-image {
+    flex: none;
+    margin: auto;
+    max-width: none;
+}
+
+.ps-nav {
+    position: absolute;
+    top: 50%;
+    z-index: 1;
+    width: 40px;
+    height: 64px;
+    margin-top: -32px;
+    padding: 0;
+    border: none;
+    border-radius: 6px;
+    background: rgba(255, 255, 255, 0.14);
+    color: #fff;
+    font-size: 20px;
+    cursor: pointer;
+}
+
+.ps-nav:hover {
+    background: rgba(255, 255, 255, 0.28);
+}
+
+.ps-nav:disabled {
+    opacity: 0.25;
+    cursor: default;
+}
+
+.ps-nav-prev {
+    left: 8px;
+}
+
+.ps-nav-next {
+    right: 8px;
+}
+
+.ps-viewer-info {
+    flex: none;
+    width: 280px;
+    box-sizing: border-box;
+    overflow-y: auto;
+    padding: 12px;
+    border-left: 1px solid rgba(255, 255, 255, 0.2);
+    font-size: 12px;
+    line-height: 1.5;
+}
+
+.ps-info-label {
+    margin-top: 10px;
+    color: rgba(255, 255, 255, 0.6);
+}
+
+.ps-info-label:first-child {
+    margin-top: 0;
+}
+
+.ps-info-value {
+    font-family: var(--font-mono), monospace;
+    word-break: break-all;
+}
+
+.ps-delete-dialog {
+    z-index: 40;
+}
+
+/* キュー登録（カードや「キュー」ボタンの下に出す小さなパネル）。再生成の登録も同じ形 */
+.ps-queue-panel,
+.ps-regen-panel {
+    position: fixed;
+    /* 編集画面やカット案の画面より上、ダイアログ（20）やビューワーより下 */
+    z-index: 15;
+    box-sizing: border-box;
+    width: 360px;
+    max-width: calc(100vw - 16px);
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 10px;
+    border: 1px solid var(--border-color-primary);
+    border-radius: 8px;
+    background: var(--background-fill-primary);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
+}
+
+.ps-queue-panel.ps-qp-in,
+.ps-regen-panel.ps-qp-in {
+    animation: ps-cut-bar-in 0.12s ease-out;
+}
+
+.ps-regen-panel {
+    width: 300px;
+}
+
+.ps-regen-panel .ps-qp-fields {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.ps-regen-note {
+    font-size: 11px;
+    color: var(--body-text-color-subdued);
+}
+
+.ps-gallery-selinfo {
+    font-size: 12px;
+    color: var(--color-accent);
+}
+
+/* カット案のカードに、サムネイル一覧で選択中の枚数を出す */
+.ps-cut-sel {
+    position: absolute;
+    left: 6px;
+    bottom: 6px;
+    padding: 0 7px;
+    border-radius: 9px;
+    background: var(--color-accent);
+    color: #fff;
+    font-size: 11px;
+    line-height: 18px;
+}
+
+.ps-qp-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+}
+
+.ps-qp-title {
+    flex: none;
+    font-weight: 600;
+}
+
+.ps-qp-cut {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    color: var(--body-text-color-subdued);
+    font-size: 12px;
+}
+
+.ps-qp-fields {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 6px;
+}
+
+.ps-qp-fields label {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+    font-size: 11px;
+    color: var(--body-text-color-subdued);
+}
+
+.ps-qp-fields .ps-qp-name {
+    grid-column: 1 / -1;
+}
+
+#mtm-fs .ps-qp-fields input {
+    box-sizing: border-box;
+    width: 100%;
+    min-width: 0;
+    padding: 3px 5px;
+    font-size: 12px;
+}
+
+.ps-qp-foot {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.ps-queue-head {
+    flex: 1;
+    min-width: 0;
+    font-size: 12px;
+    color: var(--body-text-color-subdued);
+}
+
+.ps-queue-head.ps-qp-added {
+    color: #16a34a;
+}
+
+/* 生成の進捗のトースト（画面右上、上部バーのすぐ下） */
+.ps-toast {
+    position: fixed;
+    /* ダイアログやビューワーの上にも出す */
+    z-index: 50;
+    box-sizing: border-box;
+    width: 320px;
+    max-width: calc(100vw - 24px);
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 10px 12px;
+    border: 1px solid var(--border-color-primary);
+    border-left: 4px solid var(--color-accent, #f97316);
+    border-radius: 8px;
+    background: var(--background-fill-primary);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
+    animation: ps-toast-in 0.18s ease-out;
+}
+
+.ps-toast.ps-toast-done {
+    border-left-color: #16a34a;
+}
+
+.ps-toast.ps-toast-failed {
+    border-left-color: #dc2626;
+}
+
+@keyframes ps-toast-in {
+    from {
+        opacity: 0;
+        transform: translateX(24px);
+    }
+}
+
+.ps-toast-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+}
+
+.ps-toast-title {
+    flex: none;
+    font-weight: 600;
+}
+
+.ps-toast-sub {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    color: var(--body-text-color-subdued);
+    font-size: 12px;
+}
+
+.ps-toast-close {
+    margin-left: auto;
+}
+
+.ps-toast-bar {
+    height: 6px;
+    border-radius: 3px;
+    background: var(--background-fill-secondary);
+    overflow: hidden;
+}
+
+.ps-toast-fill {
+    height: 100%;
+    width: 0;
+    background: var(--color-accent, #f97316);
+    transition: width 0.3s ease;
+}
+
+.ps-toast-done .ps-toast-fill {
+    background: #16a34a;
+}
+
+/* プレビューで生成した画像。押すとビューワーで開く */
+.ps-toast-thumb {
+    align-self: flex-start;
+    padding: 0;
+    border: 1px solid var(--border-color-primary);
+    border-radius: 6px;
+    background: var(--background-fill-secondary);
+    overflow: hidden;
+    cursor: zoom-in;
+}
+
+.ps-toast-thumb img {
+    display: block;
+    max-width: 160px;
+    max-height: 200px;
+}
+
+.ps-toast-thumb:hover {
+    border-color: var(--color-accent, #f97316);
+}
+
+.ps-toast-foot {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.ps-toast-text {
+    flex: 1;
+    min-width: 0;
+    font-size: 12px;
+    color: var(--body-text-color-subdued);
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
+
+.ps-toast .ps-toast-stop {
+    padding: 2px 10px;
+    font-size: 12px;
+}
+
+/* パネルを出しているカット案 */
+.ps-cut.ps-queue-open {
+    outline: 2px solid var(--color-accent, #f97316);
+    outline-offset: 1px;
+}
+
+/* キュー管理（上部バーの「キュー管理」ボタンの下に出すパネル） */
+.ps-queues-view {
+    position: fixed;
+    /* キュー登録のパネルと同じ高さ。ダイアログ（20）やビューワーより下 */
+    z-index: 15;
+    box-sizing: border-box;
+    width: 560px;
+    max-width: calc(100vw - 16px);
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 10px;
+    border: 1px solid var(--border-color-primary);
+    border-radius: 8px;
+    background: var(--background-fill-primary);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
+}
+
+.ps-queues-view.ps-qp-in {
+    animation: ps-cut-bar-in 0.12s ease-out;
+}
+
+.ps-qm-count {
+    flex: none;
+    font-size: 12px;
+    color: var(--body-text-color-subdued);
+}
+
+.ps-queues-progress {
+    flex: 1;
+    min-width: 0;
+    font-family: var(--font-mono), monospace;
+    font-size: 11px;
+    color: var(--body-text-color-subdued);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.ps-qm-toolbar {
+    flex: none;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--border-color-primary);
+    font-size: 12px;
+}
+
+.ps-qm-toolbar .mtm-btn {
+    padding: 3px 8px;
+    font-size: 12px;
+}
+
+.ps-qm-list {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.ps-qm-row {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto auto;
+    align-items: center;
+    gap: 2px 8px;
+    padding: 6px 8px;
+    border: 1px solid var(--border-color-primary);
+    border-radius: 6px;
+    background: var(--background-fill-secondary);
+    font-size: 12px;
+}
+
+.ps-qm-actions .mtm-btn {
+    padding: 2px 8px;
+    font-size: 12px;
+}
+
+.ps-qm-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 4px 10px;
+    min-width: 0;
+}
+
+.ps-qm-name {
+    font-weight: 600;
+}
+
+.ps-qm-name.ps-error {
+    color: #dc2626;
+}
+
+.ps-qm-cut {
+    font-size: 12px;
+    color: var(--body-text-color-subdued);
+}
+
+.ps-qm-status {
+    padding: 0 8px;
+    border-radius: 9px;
+    background: var(--button-secondary-background-fill);
+    font-size: 11px;
+    line-height: 18px;
+    white-space: nowrap;
+}
+
+.ps-qm-status.ps-done {
+    background: var(--color-accent-soft);
+}
+
+.ps-qm-status.ps-running {
+    background: var(--color-accent);
+    color: #fff;
+}
+
+.ps-qm-status.ps-error {
+    background: rgba(220, 38, 38, 0.18);
+}
+
+.ps-qm-actions {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.ps-qm-detail,
+.ps-qm-prompt {
+    grid-column: 2 / -1;
+    min-width: 0;
+    font-size: 12px;
+    color: var(--body-text-color-subdued);
+}
+
+.ps-qm-prompt {
+    font-family: var(--font-mono), monospace;
+    font-size: 11px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* 削除の確認の文は、Book の警告などを改行して足す */
+.ps-delete-text {
+    white-space: pre-line;
+}
+
+/* サムネイルの Book の印 */
+.ps-thumb-book {
+    position: absolute;
+    left: 5px;
+    bottom: 5px;
+    padding: 0 5px;
+    border-radius: 8px;
+    background: rgba(0, 0, 0, 0.6);
+    color: #fff;
+    font-size: 11px;
+    line-height: 17px;
+}
+
+/* Book に追加（サムネイル一覧のボタンの下に出す小さなパネル） */
+.ps-book-panel {
+    position: fixed;
+    z-index: 15;
+    box-sizing: border-box;
+    width: 320px;
+    max-width: calc(100vw - 16px);
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 10px;
+    border: 1px solid var(--border-color-primary);
+    border-radius: 8px;
+    background: var(--background-fill-primary);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
+}
+
+.ps-book-panel.ps-qp-in {
+    animation: ps-cut-bar-in 0.12s ease-out;
+}
+
+.ps-book-choices {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    max-height: 240px;
+    overflow-y: auto;
+    font-size: 13px;
+}
+
+.ps-book-choice {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 3px 4px;
+    border-radius: 4px;
+    cursor: pointer;
+}
+
+.ps-book-choice:hover {
+    background: var(--background-fill-secondary);
+}
+
+.ps-book-choice-title {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
+
+.ps-book-choice-count {
+    flex: none;
+    font-size: 11px;
+    color: var(--body-text-color-subdued);
+}
+
+#mtm-fs .ps-book-new-title {
+    flex: 1;
+    min-width: 0;
+    padding: 3px 6px;
+    font-size: 12px;
+}
+
+/* Book の画面（左に Book の一覧、右に開いている Book） */
+.ps-books-body {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+}
+
+.ps-books-side {
+    flex: none;
+    width: 220px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 12px;
+    border-right: 1px solid var(--border-color-primary);
+    overflow-y: auto;
+}
+
+.ps-books-list {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.ps-books-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 8px;
+    border: 0;
+    border-radius: 6px;
+    background: none;
+    color: inherit;
+    font-size: 13px;
+    text-align: left;
+    cursor: pointer;
+}
+
+.ps-books-item:hover {
+    background: var(--background-fill-secondary);
+}
+
+.ps-books-item.ps-on {
+    background: var(--color-accent-soft);
+    font-weight: 600;
+}
+
+.ps-books-item-title {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
+
+.ps-books-item-count {
+    flex: none;
+    font-size: 11px;
+    font-weight: normal;
+    color: var(--body-text-color-subdued);
+}
+
+.ps-book-main {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+}
+
+.ps-book-tools {
+    flex: none;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 16px 4px;
+}
+
+#mtm-fs .ps-book-title {
+    flex: 0 1 320px;
+    min-width: 120px;
+    padding: 4px 8px;
+    font-size: 15px;
+    font-weight: 600;
+}
+
+.ps-book-count {
+    font-size: 12px;
+    color: var(--body-text-color-subdued);
+}
+
+.ps-book-hint {
+    flex: none;
+    padding: 0 16px 8px;
+    border-bottom: 1px solid var(--border-color-primary);
+    font-size: 11px;
+    color: var(--body-text-color-subdued);
+}
+
+.ps-book-pages {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+    grid-auto-rows: max-content;
+    gap: 10px;
+    padding: 12px 16px;
+}
+
+.ps-book-pages > .mtm-empty {
+    grid-column: 1 / -1;
+}
+
+.ps-book-page {
+    position: relative;
+    aspect-ratio: 3 / 4;
+    border: 1px solid var(--border-color-primary);
+    border-radius: 6px;
+    overflow: hidden;
+    background: var(--background-fill-secondary);
+    cursor: pointer;
+}
+
+.ps-book-page img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    pointer-events: none;
+}
+
+.ps-book-page.ps-dragging {
+    opacity: 0.4;
+}
+
+/* 落とす位置を左右の縁の線で示す */
+.ps-book-page.ps-drop-before {
+    box-shadow: inset 4px 0 0 var(--color-accent);
+}
+
+.ps-book-page.ps-drop-after {
+    box-shadow: inset -4px 0 0 var(--color-accent);
+}
+
+.ps-book-page.ps-missing {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.ps-book-missing {
+    font-size: 11px;
+    color: var(--body-text-color-subdued);
+}
+
+.ps-book-no {
+    position: absolute;
+    left: 5px;
+    top: 5px;
+    padding: 0 6px;
+    border-radius: 8px;
+    background: var(--color-accent);
+    color: #fff;
+    font-size: 11px;
+    font-weight: 600;
+    line-height: 18px;
+}
+
+.ps-book-cut {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    padding: 2px 6px;
+    background: rgba(0, 0, 0, 0.55);
+    color: #fff;
+    font-size: 11px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.ps-book-cut:empty {
+    display: none;
+}
+
+#mtm-fs .ps-book-remove {
+    position: absolute;
+    right: 4px;
+    top: 4px;
+    background: rgba(0, 0, 0, 0.55);
+    color: #fff;
+}

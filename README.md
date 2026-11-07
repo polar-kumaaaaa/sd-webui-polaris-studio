@@ -1,0 +1,78 @@
+# Polaris Studio（ポラスタ）
+
+Stable Diffusion WebUI reForge 向けの拡張機能です。
+画像生成を「プロジェクト → シーン → カット案」の単位で整理し、プロンプトの組み立て、試し生成、まとめての生成、できた画像の選別までを 1 つの画面で行えます。
+
+*A reForge extension that organizes image generation into projects, scenes and cuts, with a tag-based prompt editor, generation queues, an image browser and "Books" exported as metadata-free ZIPs. The UI is in Japanese.*
+
+## 動作環境
+
+- [Stable Diffusion WebUI reForge](https://github.com/Panchovix/stable-diffusion-webui-reForge) で動作を確認しています。
+- 追加のライブラリは不要です（WebUI に入っているものだけを使います）。
+
+## インストール
+
+1. WebUI の「Extensions」→「Install from URL」を開きます。
+2. 「URL for extension's git repository」に次を入れて「Install」を押します。
+   ```
+   https://github.com/polar-kumaaaaa/sd-webui-polaris-studio.git
+   ```
+3. WebUI を再起動します。
+
+画面上部の設定の行の右端に「Polaris Studio」ボタンが出ます。押すか **Alt+P** で開きます（もう一度 Alt+P で元の画面に戻ります）。
+
+## 見本データ
+
+`samples/projects.json` に、タグ定義・シーン・カット案の入った見本のプロジェクトがあります。
+使うときは、WebUI を止めてから拡張フォルダの `data/projects.json` としてコピーし、起動し直してください。
+
+```
+extensions/sd-webui-polaris-studio/data/projects.json
+```
+
+> すでに `data/projects.json` があるときにコピーすると、今のプロジェクトがすべて置き換わります。
+> 見本を読み込んだあとは、新しいプロジェクトを作るときに「タグ定義」で「サンプル からコピー」を選ぶと、見本のタグ定義を引き継げます。
+
+## 主な機能
+
+### プロジェクト・シーン・カット案
+- プロジェクトごとに、シーンとカット案（1 枚の絵の案）を並べて管理します。カット案はドラッグで並べ替えられ、シーンをまたいで移動できます。
+- シーンは折りたたんで 1 行にできます。
+- 画像をシーンにドロップすると、その画像からカット案を作ります。
+
+### プロンプト編集
+- タグは「カテゴリ」ごとに登録します。カテゴリには「排他（1 つだけ）」「ネガティブ専用」を指定できます。
+- 左のカテゴリから選んだタグを右に並べると、その順でプロンプトが組み立てられます。プロンプト欄は直接書き換えることもできます。
+- 保存のたびに履歴を残し、前の状態に戻せます。
+
+### 生成
+- 「プレビュー」で 1 枚だけ試しに生成します。
+- 「キュー」に Steps・Batch・Seed などを決めて登録し、キュー管理からまとめて実行します。
+- 進捗は画面右上のトーストに出ます。生成中も画面は操作できます。
+- 生成はいつもの txt2img の画面を使います。実行すると、プロンプト・Steps・Seed などが txt2img の欄に書き込まれます。
+
+### サムネイル一覧とビューワー
+- カット案ごとに、生成した画像を一覧で見られます。プロンプトや Seed で検索・絞り込みができます。
+- 画像はカット案をまたいで複数選択でき、まとめて削除できます。
+- 「再生成」：選んだ画像を、元のプロンプト・Seed・サイズのまま Steps だけ変えて作り直すキューを登録します。
+- ビューワーでは、拡大縮小、キー画像（カードに出す画像）の指定、生成情報の表示、画像のプロンプトをカット案に戻す、インペイントに送る、ができます。
+
+### Book
+- 選んだ画像を「Book」にまとめ、ドラッグで順番を決められます。1 つの画像を複数の Book に入れられます。
+- 「ZIP で書き出し」で、生成情報などのメタ情報をすべて取り除いた PNG を、Book 内の順番（`001.png`, `002.png` …）のファイル名で ZIP にまとめて保存します。
+
+## データの保存場所
+
+| 中身 | 場所 |
+|---|---|
+| プロジェクト（タグ定義・シーン・カット案・キュー・Book） | 拡張フォルダの `data/projects.json` |
+| 生成した画像 | WebUI の出力フォルダの中の `polaris-studio/<プロジェクト>/<カット案>/`（初期設定では `outputs/polaris-studio/`） |
+
+## 注意
+
+- 画像やカット案、プロジェクトの削除は、画像の実ファイルごと削除します。元に戻せません。
+- 「再生成」は、元の画像と同じ構図にするために、画像のサイズを txt2img の幅・高さに書き込みます。実行後もその値が残ります。
+
+## ライセンス
+
+[MIT](LICENSE)

@@ -1,0 +1,89 @@
+{
+  "version": 1,
+  "projects": [
+    {
+      "id": "sample",
+      "title": "サンプル",
+      "coverCutId": "",
+      "categories": [
+        {"id": "quality", "name": "画質", "exclusive": false, "negative": false},
+        {"id": "subject", "name": "人物", "exclusive": true, "negative": false},
+        {"id": "hair", "name": "髪型", "exclusive": true, "negative": false},
+        {"id": "outfit", "name": "服装", "exclusive": false, "negative": false},
+        {"id": "expression", "name": "表情", "exclusive": true, "negative": false},
+        {"id": "framing", "name": "構図", "exclusive": true, "negative": false},
+        {"id": "background", "name": "背景", "exclusive": false, "negative": false},
+        {"id": "lighting", "name": "光", "exclusive": false, "negative": false},
+        {"id": "negative", "name": "ネガティブ", "exclusive": false, "negative": true}
+      ],
+      "entries": [
+        {"id": "e01", "categoryId": "quality", "tags": "masterpiece, best quality", "description": "定番の画質タグ"},
+        {"id": "e02", "categoryId": "quality", "tags": "highly detailed", "description": "描き込み"},
+        {"id": "e03", "categoryId": "subject", "tags": "1girl, solo", "description": "女の子 1 人"},
+        {"id": "e04", "categoryId": "subject", "tags": "1boy, solo", "description": "男の子 1 人"},
+        {"id": "e05", "categoryId": "subject", "tags": "2girls", "description": "女の子 2 人"},
+        {"id": "e06", "categoryId": "hair", "tags": "long hair", "description": "ロング"},
+        {"id": "e07", "categoryId": "hair", "tags": "short hair", "description": "ショート"},
+        {"id": "e08", "categoryId": "hair", "tags": "ponytail", "description": "ポニーテール"},
+        {"id": "e09", "categoryId": "outfit", "tags": "school uniform", "description": "制服"},
+        {"id": "e10", "categoryId": "outfit", "tags": "white dress", "description": "白いワンピース"},
+        {"id": "e11", "categoryId": "outfit", "tags": "hoodie", "description": "パーカー"},
+        {"id": "e12", "categoryId": "expression", "tags": "smile", "description": "笑顔"},
+        {"id": "e13", "categoryId": "expression", "tags": "surprised", "description": "驚き"},
+        {"id": "e14", "categoryId": "expression", "tags": "closed eyes", "description": "目を閉じる"},
+        {"id": "e15", "categoryId": "framing", "tags": "upper body", "description": "バストアップ"},
+        {"id": "e16", "categoryId": "framing", "tags": "full body", "description": "全身"},
+        {"id": "e17", "categoryId": "framing", "tags": "from above", "description": "俯瞰"},
+        {"id": "e18", "categoryId": "background", "tags": "blue sky, clouds", "description": "青空"},
+        {"id": "e19", "categoryId": "background", "tags": "classroom", "description": "教室"},
+        {"id": "e20", "categoryId": "background", "tags": "night city", "description": "夜の街"},
+        {"id": "e21", "categoryId": "lighting", "tags": "sunlight", "description": "日差し"},
+        {"id": "e22", "categoryId": "lighting", "tags": "backlighting", "description": "逆光"},
+        {"id": "e23", "categoryId": "negative", "tags": "lowres, bad anatomy, bad hands", "description": "崩れ対策"},
+        {"id": "e24", "categoryId": "negative", "tags": "text, watermark, signature", "description": "文字・透かし"},
+        {"id": "e25", "categoryId": "negative", "tags": "worst quality, low quality", "description": "低画質"}
+      ],
+      "scenes": [
+        {
+          "id": "scene1",
+          "name": "シーン1 放課後",
+          "cuts": [
+            {
+              "id": "cut1",
+              "title": "教室の窓辺",
+              "positive": "masterpiece, best quality, 1girl, solo, long hair, school uniform, smile, upper body, classroom, sunlight",
+              "negative": "lowres, bad anatomy, bad hands, text, watermark, signature",
+              "steps": 28, "seed": -1, "subseed": -1, "subseedStrength": 0,
+              "keyImage": "", "picks": null, "history": [], "createdAt": "2026-01-01T00:00:00.000Z"
+            },
+            {
+              "id": "cut2",
+              "title": "振り返る",
+              "positive": "masterpiece, best quality, 1girl, solo, long hair, school uniform, surprised, full body, classroom, backlighting",
+              "negative": "lowres, bad anatomy, bad hands, text, watermark, signature",
+              "steps": 28, "seed": -1, "subseed": -1, "subseedStrength": 0,
+              "keyImage": "", "picks": null, "history": [], "createdAt": "2026-01-01T00:00:00.000Z"
+            }
+          ]
+        },
+        {
+          "id": "scene2",
+          "name": "シーン2 帰り道",
+          "cuts": [
+            {
+              "id": "cut3",
+              "title": "夕暮れの空",
+              "positive": "masterpiece, best quality, 1girl, solo, ponytail, hoodie, closed eyes, from above, blue sky, clouds, sunlight",
+              "negative": "lowres, bad anatomy, bad hands, worst quality, low quality",
+              "steps": 28, "seed": -1, "subseed": -1, "subseedStrength": 0,
+              "keyImage": "", "picks": null, "history": [], "createdAt": "2026-01-01T00:00:00.000Z"
+            }
+          ]
+        }
+      ],
+      "queues": [],
+      "books": [],
+      "createdAt": "2026-01-01T00:00:00.000Z"
+    }
+  ]
+}
