@@ -2520,6 +2520,17 @@ body.mtm-fs-open {
     user-select: none;
 }
 
+/* 原寸で置くときの、できあがりの余白（白） */
+.ps-pg-croppaper {
+    position: absolute;
+    background: #fff;
+}
+
+/* 原寸では枠の大きさは変えない */
+.ps-pg-frame.ps-pg-fixed .ps-pg-fh {
+    display: none;
+}
+
 .ps-pg-cropimg {
     position: absolute;
     max-width: none;

@@ -243,6 +243,7 @@ def _sanitize_page(raw, cut_ids):
 
 
 # 四角にはめ込んだ画像。iw・ih はクロップしたときの画像の大きさ、crop はその画像の中の範囲（ピクセル）。
+# mode が "full"（原寸）なら画像を拡大・縮小せずに置き、crop は画像からはみ出してよい（はみ出した所は白い余白）。
 # 元の画像には手を加えない
 def _sanitize_panel_image(raw, cut_ids):
     if not isinstance(raw, dict):
@@ -253,7 +254,10 @@ def _sanitize_panel_image(raw, cut_ids):
     cw, ch = _number(crop.get("w")), _number(crop.get("h"))
     if not ref or iw < 1 or ih < 1 or cw < 1 or ch < 1:
         return None
-    return {**ref, "iw": iw, "ih": ih, "crop": {"x": _number(crop.get("x")), "y": _number(crop.get("y")), "w": cw, "h": ch}}
+    image = {**ref, "iw": iw, "ih": ih, "crop": {"x": _number(crop.get("x")), "y": _number(crop.get("y")), "w": cw, "h": ch}}
+    if raw.get("mode") == "full":
+        image["mode"] = "full"
+    return image
 
 
 def _sanitize_scene(raw):
@@ -490,6 +494,14 @@ def fitted_crop(crop, w, h):
     return x, y, cw, ch
 
 
+# 四角に映す画像の範囲（JS の panelCrop と同じ）。原寸は四角と同じ大きさの範囲を、範囲の中心に合わせて取る
+def panel_crop(ref, w, h):
+    if ref.get("mode") != "full":
+        return fitted_crop(ref["crop"], w, h)
+    c = ref["crop"]
+    return c["x"] + c["w"] / 2 - w / 2, c["y"] + c["h"] / 2 - h / 2, w, h
+
+
 # コマページを 1 枚の画像にする。白地に画像を置き、その上に四角の線と直線を描く。
 # 見つからない画像の四角は空けておく
 def render_page(project, page):
@@ -505,7 +517,8 @@ def render_page(project, page):
             src = src.convert("RGBA")
         # クロップした後で画像の大きさが変わっていても、同じ割合の範囲を使う
         sx, sy = src.width / ref["iw"], src.height / ref["ih"]
-        x, y, cw, ch = fitted_crop(ref["crop"], s["w"], s["h"])
+        x, y, cw, ch = panel_crop(ref, s["w"], s["h"])
+        # 画像からはみ出した範囲は透明になり、白地がそのまま余白として残る
         box = (round(x * sx), round(y * sy), round((x + cw) * sx), round((y + ch) * sy))
         size = (max(1, round(s["w"])), max(1, round(s["h"])))
         part = src.crop(box).resize(size, Image.LANCZOS)

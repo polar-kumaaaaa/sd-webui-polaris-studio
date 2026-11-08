@@ -59,6 +59,16 @@
         return {x, y, w: cw, h: ch};
     }
 
+    // 四角に映す画像の範囲（画像のピクセル）。
+    // "full"（原寸）は画像を拡大・縮小せずに置く。範囲は四角と同じ大きさで、画像からはみ出した所は白い余白になる。
+    // 四角の大きさをあとで変えても原寸のまま、範囲の中心を保つ。
+    // それ以外（拡大して合わせる）は範囲を四角いっぱいに引き伸ばす（縦横比が違えば中央で合わせる）
+    function panelCrop(image, w, h) {
+        if (image.mode !== "full") return fittedCrop(image.crop, w, h);
+        const c = image.crop;
+        return {x: c.x + c.w / 2 - w / 2, y: c.y + c.h / 2 - h / 2, w, h};
+    }
+
     // ページを g に描く。resolve(ref) は画像の URL（見つからなければ null）。editing では空の四角や線のない四角の目印も描く
     function drawPage(g, page, resolve, editing) {
         g.appendChild(svgEl("rect", {x: 0, y: 0, width: page.width, height: page.height, fill: "#fff"}));
@@ -66,7 +76,7 @@
             if (s.type !== "rect") continue;
             const url = s.image && resolve(s.image);
             if (url) {
-                const c = fittedCrop(s.image.crop, s.w, s.h);
+                const c = panelCrop(s.image, s.w, s.h);
                 g.appendChild(svgEl("svg", {x: s.x, y: s.y, width: s.w, height: s.h, viewBox: `${c.x} ${c.y} ${c.w} ${c.h}`, preserveAspectRatio: "none"}, [
                     svgEl("image", {href: url, width: s.image.iw, height: s.image.ih, preserveAspectRatio: "none"}),
                 ]));
@@ -112,7 +122,8 @@
     let svg = null;
     let ed = null;      // {page, opts, tool, sel, undo, redo}
     let drag = null;
-    const prefs = {tool: "rect", line: 4, rect: 4};
+    // cropMode: 新しくはめ込むときの置き方。"cover" は拡大して合わせる、"full" は原寸
+    const prefs = {tool: "rect", line: 4, rect: 4, cropMode: "cover"};
 
     const q = (sel) => view.querySelector(sel);
     // キー操作は画面の土台（#mtm-fs）で受ける。押したボタンが隠れるとフォーカスが外れるので戻す
@@ -130,6 +141,7 @@
             if (["select", "line", "rect"].includes(saved.tool)) prefs.tool = saved.tool;
             if (STROKES.includes(saved.line) && saved.line) prefs.line = saved.line;
             if (STROKES.includes(saved.rect)) prefs.rect = saved.rect;
+            if (saved.cropMode === "full") prefs.cropMode = "full";
         } catch (e) { /* 覚えていなくても既定で使える */ }
     }
 
@@ -177,9 +189,15 @@
                     <div class="ps-pg-crop-head">
                         <span class="ps-pg-crop-title"></span>
                         <span class="ps-pg-crop-info"></span>
+                        <span class="mtm-fs-spacer"></span>
+                        <span class="ps-pg-group ps-pg-cropmode ps-off">
+                            <button type="button" class="mtm-btn" data-mode="cover" title="選んだ範囲をコマいっぱいに拡大・縮小します">拡大して合わせる</button>
+                            <button type="button" class="mtm-btn" data-mode="full" title="画像を原寸のまま置きます。コマが画像より大きければ、残りは白い余白になります">原寸</button>
+                        </span>
                     </div>
                     <div class="ps-pg-pickgrid"></div>
                     <div class="ps-pg-cropstage ps-off">
+                        <div class="ps-pg-croppaper"></div>
                         <img class="ps-pg-cropimg" alt="" draggable="false">
                         <div class="ps-pg-frame">
                             ${["nw", "ne", "se", "sw"].map((c) => `<span class="ps-pg-fh ps-pg-fh-${c}" data-corner="${c}"></span>`).join("")}
@@ -719,7 +737,8 @@
     // ---------- 画像の選択とクロップ ----------
     // 1. Book の画像から 1 枚選ぶ  2. 画像の上に四角と同じ縦横比の枠を出して、はめ込む範囲を決める
 
-    const crop = {rect: null, image: null, iw: 0, ih: 0, x: 0, y: 0, w: 0, h: 0, scale: 1, ox: 0, oy: 0, drag: null};
+    // mode: "cover"（拡大して合わせる。枠は画像の中で自由な大きさ）か "full"（原寸。枠は四角と同じ大きさで、画像からはみ出してよい）
+    const crop = {rect: null, image: null, mode: "cover", iw: 0, ih: 0, x: 0, y: 0, w: 0, h: 0, scale: 1, ox: 0, oy: 0, drag: null};
     const isCropOpen = () => view && !q(".ps-pg-crop").classList.contains("ps-off");
 
     function buildCrop() {
@@ -735,11 +754,12 @@
         q(".ps-pg-crop").addEventListener("mousedown", (e) => {
             if (e.target === e.currentTarget) closeCrop();
         });
+        view.querySelectorAll("[data-mode]").forEach((b) => b.addEventListener("click", () => setCropMode(b.dataset.mode)));
         const frame = q(".ps-pg-frame");
         frame.addEventListener("pointerdown", (e) => {
             if (e.button !== 0) return;
             e.preventDefault();
-            const corner = e.target.dataset.corner || "";
+            const corner = crop.mode === "full" ? "" : e.target.dataset.corner || "";
             crop.drag = {corner, client: {x: e.clientX, y: e.clientY}, orig: {x: crop.x, y: crop.y, w: crop.w, h: crop.h}};
             frame.setPointerCapture(e.pointerId);
         });
@@ -775,10 +795,11 @@
         const end = () => (crop.drag = null);
         frame.addEventListener("pointerup", end);
         frame.addEventListener("pointercancel", end);
-        // ホイールで枠を大きく・小さくする（中心は動かさない）
+        // ホイールで枠を大きく・小さくする（中心は動かさない）。原寸では大きさは変わらない
         q(".ps-pg-cropstage").addEventListener("wheel", (e) => {
             if (!crop.image) return;
             e.preventDefault();
+            if (crop.mode === "full") return;
             const factor = e.deltaY < 0 ? 1 / 1.1 : 1.1;
             const cx = crop.x + crop.w / 2, cy = crop.y + crop.h / 2;
             crop.w *= factor;
@@ -796,14 +817,45 @@
 
     const cropAspect = () => crop.rect.w / crop.rect.h;
 
-    // 枠は画像の中に収める。縦横比は四角と同じ
+    // 拡大して合わせる：枠は画像の中に収める。縦横比は四角と同じ。
+    // 原寸：枠は四角と同じ大きさ。画像より大きい向きは画像を枠の中に収め、小さい向きは枠を画像の中に収める
     function clampCrop() {
+        if (crop.mode === "full") {
+            crop.w = crop.rect.w;
+            crop.h = crop.rect.h;
+            const dx = crop.iw - crop.w, dy = crop.ih - crop.h;
+            crop.x = clamp(crop.x, Math.min(0, dx), Math.max(0, dx));
+            crop.y = clamp(crop.y, Math.min(0, dy), Math.max(0, dy));
+            return;
+        }
         const aspect = cropAspect();
         const maxW = Math.min(crop.iw, crop.ih * aspect);
         crop.w = clamp(crop.w, Math.min(CROP_MIN, maxW), maxW);
         crop.h = crop.w / aspect;
         crop.x = clamp(crop.x, 0, crop.iw - crop.w);
         crop.y = clamp(crop.y, 0, crop.ih - crop.h);
+    }
+
+    // 置き方を切り替える。枠の中心はそのまま
+    function setCropMode(mode) {
+        mode = mode === "full" ? "full" : "cover";
+        prefs.cropMode = mode;
+        savePrefs();
+        if (!crop.image || !crop.iw || crop.mode === mode) {
+            crop.mode = mode;
+            if (crop.image && crop.iw) placeFrame();
+            return;
+        }
+        const cx = crop.x + crop.w / 2, cy = crop.y + crop.h / 2;
+        crop.mode = mode;
+        // 拡大して合わせるに戻すときは、画像に収まる一番大きい枠にする
+        if (mode === "cover") crop.w = crop.iw;
+        crop.h = crop.w / cropAspect();
+        clampCrop();
+        crop.x = cx - crop.w / 2;
+        crop.y = cy - crop.h / 2;
+        clampCrop();
+        placeFrame();
     }
 
     function openPicker(rect) {
@@ -824,6 +876,7 @@
         q(".ps-pg-crop-note").textContent = "この Book に登録した画像から選びます";
         q(".ps-pg-crop-note").classList.remove("ps-pg-warn");
         q(".ps-pg-cropstage").classList.add("ps-off");
+        q(".ps-pg-cropmode").classList.add("ps-off");
         q(".ps-pg-crop-ok").classList.add("ps-off");
         q(".ps-pg-crop-repick").classList.add("ps-off");
         q(".ps-pg-crop-remove").classList.toggle("ps-off", !crop.rect.image);
@@ -848,9 +901,10 @@
     function startCrop(ref, url) {
         crop.image = {cutId: ref.cutId, name: ref.name};
         q(".ps-pg-crop-title").textContent = "はめ込む範囲を決める";
-        q(".ps-pg-crop-note").textContent = "枠をドラッグで移動、角をドラッグかホイールで大きさを変えます。Enter で決定。";
+        q(".ps-pg-crop-note").textContent = "";
         q(".ps-pg-pickgrid").classList.add("ps-off");
         q(".ps-pg-cropstage").classList.remove("ps-off");
+        q(".ps-pg-cropmode").classList.remove("ps-off");
         q(".ps-pg-crop-ok").classList.remove("ps-off");
         q(".ps-pg-crop-repick").classList.remove("ps-off");
         q(".ps-pg-crop-remove").classList.toggle("ps-off", !crop.rect.image);
@@ -869,45 +923,66 @@
         const rect = crop.rect;
         const prev = rect.image;
         if (prev && prev.cutId === crop.image.cutId && prev.name === crop.image.name) {
-            // 前の範囲から始める。画像の大きさが変わっていたら同じ割合にする。四角の縦横比が変わっていたら中央で合わせる
+            // 前の範囲と置き方から始める。画像の大きさが変わっていたら同じ割合にする。四角の大きさが変わっていたら中央で合わせる
+            crop.mode = prev.mode === "full" ? "full" : "cover";
             const sx = crop.iw / prev.iw, sy = crop.ih / prev.ih;
-            const c = fittedCrop(prev.crop, rect.w, rect.h);
-            Object.assign(crop, {x: c.x * sx, y: c.y * sy, w: c.w * sx, h: c.h * sy});
+            const c = panelCrop(prev, rect.w, rect.h);
+            if (crop.mode === "full") Object.assign(crop, {x: (c.x + c.w / 2) * sx - c.w / 2, y: (c.y + c.h / 2) * sy - c.h / 2});
+            else Object.assign(crop, {x: c.x * sx, y: c.y * sy, w: c.w * sx, h: c.h * sy});
         } else {
-            // 最初は四角と同じ大きさ（画像に収まらなければ縮める）で中央に置く
+            // 最初は前回の置き方で、四角と同じ大きさ（拡大して合わせるでは、画像に収まらなければ縮める）の枠を画像の中央に置く
+            crop.mode = prefs.cropMode;
             Object.assign(crop, {w: rect.w, h: rect.h});
+            clampCrop();
             crop.x = (crop.iw - crop.w) / 2;
             crop.y = (crop.ih - crop.h) / 2;
         }
         clampCrop();
-        crop.x = clamp(crop.x, 0, crop.iw - crop.w);
-        crop.y = clamp(crop.y, 0, crop.ih - crop.h);
         q(".ps-pg-frame").classList.remove("ps-off");
         placeFrame();
     }
 
-    // 画像をステージに収めて表示し、その上に枠を置く
+    // 画像と枠をステージに収めて表示する。原寸で枠が画像より大きいときは、枠が動ける範囲まで含めて収め、
+    // 画像の外は白い紙（できあがりの余白）として見せる
     function placeFrame() {
         const stage = q(".ps-pg-cropstage");
         const img = q(".ps-pg-cropimg");
         const sw = stage.clientWidth, sh = stage.clientHeight;
         if (!sw || !sh || !crop.iw) return;
-        crop.scale = Math.min(sw / crop.iw, sh / crop.ih);
-        crop.ox = (sw - crop.iw * crop.scale) / 2;
-        crop.oy = (sh - crop.ih * crop.scale) / 2;
-        Object.assign(img.style, {left: crop.ox + "px", top: crop.oy + "px", width: crop.iw * crop.scale + "px", height: crop.ih * crop.scale + "px"});
+        const full = crop.mode === "full";
+        view.querySelectorAll("[data-mode]").forEach((b) => b.classList.toggle("mtm-active", b.dataset.mode === crop.mode));
+        q(".ps-pg-frame").classList.toggle("ps-pg-fixed", full);
+        const bx = full ? Math.min(0, crop.iw - crop.w) : 0;
+        const by = full ? Math.min(0, crop.ih - crop.h) : 0;
+        const bw = full ? Math.max(crop.iw, crop.w) - bx : crop.iw;
+        const bh = full ? Math.max(crop.ih, crop.h) - by : crop.ih;
+        crop.scale = Math.min(sw / bw, sh / bh);
+        crop.ox = (sw - bw * crop.scale) / 2 - bx * crop.scale;
+        crop.oy = (sh - bh * crop.scale) / 2 - by * crop.scale;
+        const px = (v) => v + "px";
+        Object.assign(img.style, {left: px(crop.ox), top: px(crop.oy), width: px(crop.iw * crop.scale), height: px(crop.ih * crop.scale)});
+        const paper = q(".ps-pg-croppaper");
+        paper.classList.toggle("ps-off", !full);
+        Object.assign(paper.style, {left: px(crop.ox + bx * crop.scale), top: px(crop.oy + by * crop.scale), width: px(bw * crop.scale), height: px(bh * crop.scale)});
         Object.assign(q(".ps-pg-frame").style, {
-            left: crop.ox + crop.x * crop.scale + "px", top: crop.oy + crop.y * crop.scale + "px",
-            width: crop.w * crop.scale + "px", height: crop.h * crop.scale + "px",
+            left: px(crop.ox + crop.x * crop.scale), top: px(crop.oy + crop.y * crop.scale),
+            width: px(crop.w * crop.scale), height: px(crop.h * crop.scale),
         });
+        const size = `コマ ${Math.round(crop.rect.w)} × ${Math.round(crop.rect.h)}`;
+        const note = q(".ps-pg-crop-note");
+        if (full) {
+            q(".ps-pg-crop-info").textContent = `画像 ${crop.iw} × ${crop.ih} → ${size}（原寸）`;
+            note.classList.remove("ps-pg-warn");
+            note.textContent = "画像を拡大・縮小せずに置きます。枠をドラッグで位置を決めます。画像の外は白い余白になります。Enter で決定。";
+            return;
+        }
         const ratio = crop.rect.w / crop.w;
         const pct = Math.round(ratio * 100);
-        q(".ps-pg-crop-info").textContent = `範囲 ${Math.round(crop.w)} × ${Math.round(crop.h)} → コマ ${Math.round(crop.rect.w)} × ${Math.round(crop.rect.h)}（${pct}%）`;
-        const note = q(".ps-pg-crop-note");
+        q(".ps-pg-crop-info").textContent = `範囲 ${Math.round(crop.w)} × ${Math.round(crop.h)} → ${size}（${pct}%）`;
         const warn = ratio > 1.005;
         note.classList.toggle("ps-pg-warn", warn);
         note.textContent = warn
-            ? `⚠ 範囲がコマより小さいため ${pct}% に拡大して表示されます。画質が落ちます。`
+            ? `⚠ 範囲がコマより小さいため ${pct}% に拡大して表示されます。画質が落ちます。「原寸」なら拡大せずに置けます。`
             : "枠をドラッグで移動、角をドラッグかホイールで大きさを変えます。Enter で決定。";
     }
 
@@ -917,6 +992,7 @@
         const image = {
             cutId: crop.image.cutId, name: crop.image.name, iw: crop.iw, ih: crop.ih,
             crop: {x: round1(crop.x), y: round1(crop.y), w: round1(crop.w), h: round1(crop.h)},
+            ...(crop.mode === "full" ? {mode: "full"} : {}),
         };
         closeCrop();
         change(() => (rect.image = image));
