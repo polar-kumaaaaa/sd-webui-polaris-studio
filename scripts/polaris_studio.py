@@ -19,11 +19,66 @@ from PIL import Image, ImageDraw
 from modules import images, script_callbacks, scripts, shared
 from modules.infotext_utils import parse_generation_parameters
 
+try:
+    from send2trash import send2trash as _send2trash
+except Exception:
+    _send2trash = None
+
 EXT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA_DIR = os.path.join(EXT_DIR, "data")
 PROJECTS_FILE = os.path.join(DATA_DIR, "projects.json")
+BACKUP_DIR = os.path.join(DATA_DIR, "backups")
+BACKUP_KEEP = 30            # 残す控えの数（古いものから消す）
+BACKUP_INTERVAL = 10 * 60   # 控えを取る間隔（秒）。中身が減る保存のときは間隔によらず取る
 
 _lock = threading.Lock()
+
+
+# ---------- ごみ箱 ----------
+
+def _windows_trash(path):
+    # send2trash がない Windows では、エクスプローラーと同じ API でごみ箱に送る
+    import ctypes
+    from ctypes import wintypes
+
+    class SHFILEOPSTRUCTW(ctypes.Structure):
+        _fields_ = [
+            ("hwnd", wintypes.HWND),
+            ("wFunc", wintypes.UINT),
+            ("pFrom", wintypes.LPCWSTR),
+            ("pTo", wintypes.LPCWSTR),
+            ("fFlags", ctypes.c_uint16),
+            ("fAnyOperationsAborted", wintypes.BOOL),
+            ("hNameMappings", ctypes.c_void_p),
+            ("lpszProgressTitle", wintypes.LPCWSTR),
+        ]
+
+    FO_DELETE = 3
+    FOF_SILENT, FOF_NOCONFIRMATION, FOF_ALLOWUNDO, FOF_NOERRORUI = 0x4, 0x10, 0x40, 0x400
+    op = SHFILEOPSTRUCTW(
+        wFunc=FO_DELETE,
+        pFrom=os.path.abspath(path) + "\0",   # 末尾は NUL 2 つ（もう 1 つは ctypes が付ける）
+        fFlags=FOF_SILENT | FOF_NOCONFIRMATION | FOF_ALLOWUNDO | FOF_NOERRORUI,
+    )
+    result = ctypes.windll.shell32.SHFileOperationW(ctypes.byref(op))
+    if result or op.fAnyOperationsAborted:
+        raise OSError(f"ごみ箱に移せませんでした（{result}）")
+
+
+def can_trash():
+    return _send2trash is not None or os.name == "nt"
+
+
+def remove_path(path):
+    """ファイルやフォルダを削除する。ごみ箱が使えれば、ごみ箱に移す（そこから戻せる）。"""
+    if _send2trash is not None:
+        _send2trash(os.path.abspath(path))
+    elif os.name == "nt":
+        _windows_trash(path)
+    elif os.path.isdir(path):
+        shutil.rmtree(path)
+    else:
+        os.remove(path)
 
 
 def _sanitize_tags(raw):
@@ -108,8 +163,53 @@ def load_projects():
         return {"projects": []}
 
 
+# 中身の量。プロジェクト・カット案・Book のどれかが減る保存の前には、必ず控えを取る
+def _amount(data):
+    projects = _dicts(data.get("projects"))
+    cuts = sum(len(_dicts(s.get("cuts"))) for p in projects for s in _dicts(p.get("scenes")))
+    books = sum(len(_dicts(p.get("books"))) for p in projects)
+    return len(projects), cuts, books
+
+
+def backup_projects(new_data):
+    """上書きする前の projects.json を data/backups/ に控える。"""
+    if not os.path.exists(PROJECTS_FILE):
+        return
+    os.makedirs(BACKUP_DIR, exist_ok=True)
+    names = _backup_names()
+    try:
+        with open(PROJECTS_FILE, "r", encoding="utf-8") as f:
+            old = json.load(f)
+        shrinks = any(n < o for n, o in zip(_amount(new_data), _amount(old if isinstance(old, dict) else {})))
+    except Exception:
+        shrinks = True
+    recent = names and time.time() - os.path.getmtime(os.path.join(BACKUP_DIR, names[-1])) < BACKUP_INTERVAL
+    if recent and not shrinks:
+        return
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    path = os.path.join(BACKUP_DIR, f"projects-{stamp}.json")
+    n = 1
+    while os.path.exists(path):
+        n += 1
+        path = os.path.join(BACKUP_DIR, f"projects-{stamp}-{n}.json")
+    shutil.copyfile(PROJECTS_FILE, path)
+    for old_name in _backup_names()[:-BACKUP_KEEP]:
+        os.remove(os.path.join(BACKUP_DIR, old_name))
+
+
+# 控えのファイル名を古い順に
+def _backup_names():
+    names = [n for n in os.listdir(BACKUP_DIR) if n.startswith("projects-") and n.endswith(".json")]
+    return sorted(names, key=lambda n: os.path.getmtime(os.path.join(BACKUP_DIR, n)))
+
+
 def save_projects(data):
     os.makedirs(DATA_DIR, exist_ok=True)
+    try:
+        backup_projects(data)
+    except Exception as e:
+        # 控えが取れなくても保存は止めない
+        print(f"[Polaris Studio] failed to back up {PROJECTS_FILE}: {e}")
     tmp = PROJECTS_FILE + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump({"version": 1, **data}, f, ensure_ascii=False, indent=2)
@@ -606,7 +706,7 @@ def on_app_started(demo, app):
     @app.get("/polaris-studio/projects")
     def get_projects():
         with _lock:
-            return {**load_projects(), "outputRoot": output_root()}
+            return {**load_projects(), "outputRoot": output_root(), "trash": can_trash()}
 
     @app.post("/polaris-studio/job")
     def set_job(payload: dict = Body(...)):
@@ -676,19 +776,19 @@ def on_app_started(demo, app):
             return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
         return {"ok": True, "name": saved}
 
-    # 画像は実ファイルごと削除する
+    # 画像は実ファイルごと削除する（ごみ箱が使えればごみ箱へ）
     @app.post("/polaris-studio/images/delete")
     def delete_images(payload: dict = Body(...)):
         try:
             paths = [image_path(payload.get("project"), payload.get("cut"), n) for n in payload.get("names") or []]
             for path in paths:
                 if os.path.isfile(path):
-                    os.remove(path)
+                    remove_path(path)
         except Exception as e:
             return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
         return {"ok": True}
 
-    # カット案（cut あり）またはプロジェクト（cut なし）のフォルダを実ファイルごと削除する
+    # カット案（cut あり）またはプロジェクト（cut なし）のフォルダを実ファイルごと削除する（ごみ箱が使えればごみ箱へ）
     @app.post("/polaris-studio/folder/delete")
     def delete_folder(payload: dict = Body(...)):
         global _i2i
@@ -696,7 +796,7 @@ def on_app_started(demo, app):
             cut = payload.get("cut")
             path = cut_dir(payload.get("project"), cut) if cut else project_dir(payload.get("project"))
             if os.path.isdir(path):
-                shutil.rmtree(path)
+                remove_path(path)
         except Exception as e:
             return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
         # 消したフォルダへの img2img の保存は解除する。残すと、生成したときにフォルダが作り直される

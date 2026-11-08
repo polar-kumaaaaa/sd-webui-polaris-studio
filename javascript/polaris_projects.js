@@ -14,6 +14,7 @@
 
     let projects = [];
     let outputRoot = "";
+    let canTrash = false;   // 削除した画像をごみ箱に移せるか（サーバーが教える）
     const projectImages = new Map();    // プロジェクト id → {カット案 id: 画像の一覧（古い順）}
     let project = null;     // 開いているプロジェクト
     let fs = null;
@@ -40,6 +41,7 @@
         const data = await res.json();
         projects = Array.isArray(data.projects) ? data.projects : [];
         outputRoot = data.outputRoot || "";
+        canTrash = data.trash === true;
     }
 
     // 保存は順番に行う。前の保存より後の内容が先に届いて、古い内容で上書きされないようにする
@@ -2431,7 +2433,7 @@
     function askDeleteImages(keys, title) {
         const cutIds = [...new Set(keys.map(selCutId))];
         const where = cutIds.length === 1 ? pathOf(project.id, cutIds[0]) : pathOf(project.id) + `（${cutIds.length} カット案）`;
-        askDelete(title, `${keys.length} 枚を実ファイルごと削除します。元に戻せません。` + bookWarning(keys), where, () => deleteImages(keys));
+        askDelete(title, `${keys.length} 枚を実ファイルごと削除します。${undoNote()}` + bookWarning(keys), where, () => deleteImages(keys));
     }
 
     async function deleteImages(keys) {
@@ -2741,12 +2743,16 @@
         pendingDelete = null;
     }
 
-    const BACKUP_NOTE = "元に戻せません。必要な画像は、次の保存場所から先にバックアップを取ってください。";
+    // ごみ箱に移せるなら、そこから戻せると伝える
+    const undoNote = () => canTrash ? "画像はごみ箱に移ります（ごみ箱から戻せます）。" : "元に戻せません。";
+    const backupNote = () => canTrash
+        ? "画像は次の保存場所からごみ箱に移ります。プロジェクトの内容は data/backups/ に控えが残ります。"
+        : "元に戻せません。必要な画像は、次の保存場所から先にバックアップを取ってください。";
 
     function askDeleteCut(scene, cut) {
         const count = imagesOf(project, cut).length;
         const warning = bookWarning(imagesOf(project, cut).map((x) => selKey(cut, x.name)));
-        askDelete(`カット案「${cut.title}」を削除`, `画像 ${count} 枚を実ファイルごと削除します。${BACKUP_NOTE}${warning}`, pathOf(project.id, cut.id), async () => {
+        askDelete(`カット案「${cut.title}」を削除`, `画像 ${count} 枚を実ファイルごと削除します。${backupNote()}${warning}`, pathOf(project.id, cut.id), async () => {
             try {
                 await postJson("polaris-studio/folder/delete", {project: project.id, cut: cut.id});
             } catch (e) {
@@ -2767,7 +2773,7 @@
         const count = cuts.reduce((n, c) => n + imagesOf(project, c).length, 0);
         const books = (project.books || []).length;
         const bookNote = books ? `\n⚠ Book ${books} 件も一緒に削除されます。` : "";
-        askDelete("プロジェクトを削除", `カット案 ${cuts.length} 件と画像 ${count} 枚を実ファイルごと削除します。${BACKUP_NOTE}${bookNote}`, pathOf(project.id), async () => {
+        askDelete("プロジェクトを削除", `カット案 ${cuts.length} 件と画像 ${count} 枚を実ファイルごと削除します。${backupNote()}${bookNote}`, pathOf(project.id), async () => {
             try {
                 await postJson("polaris-studio/folder/delete", {project: project.id});
             } catch (e) {
