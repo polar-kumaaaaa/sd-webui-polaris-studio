@@ -145,10 +145,11 @@
                             <input type="text" class="ps-book-title" title="Book のタイトル">
                             <span class="ps-book-count"></span>
                             <span class="mtm-fs-spacer"></span>
+                            <button type="button" class="mtm-btn ps-book-newpage" title="白紙のコマページを Book の最後に足します">＋ コマページ作成</button>
                             <button type="button" class="mtm-btn mtm-primary ps-book-export" title="メタ情報を落とした PNG を、Book 内の順序をファイル名にして ZIP で保存します">ZIP で書き出し</button>
                             <button type="button" class="mtm-btn mtm-danger ps-book-delete" title="Book だけを削除します。画像は削除しません">Book を削除</button>
                         </div>
-                        <div class="ps-book-hint">クリックでビューワー、ドラッグで並べ替えます。✕ は Book からの登録解除で、画像は削除しません。画像はサムネイル一覧で選んで「Book に追加」から登録します。</div>
+                        <div class="ps-book-hint">クリックでビューワー（コマページは編集画面）、ドラッグで並べ替えます。✕ は Book からの登録解除で、画像は削除しません。画像はサムネイル一覧で選んで「Book に追加」から登録します。</div>
                         <div class="ps-book-pages"></div>
                     </div>
                 </div>
@@ -384,6 +385,7 @@
             if (e.key === "Enter" && !e.isComposing) e.target.blur();
         });
         q(".ps-book-export").addEventListener("click", exportBook);
+        q(".ps-book-newpage").addEventListener("click", createPage);
         q(".ps-book-delete").addEventListener("click", deleteBook);
         q(".ps-regen-back").addEventListener("click", closeRegenForm);
         q(".ps-regen-save").addEventListener("click", registerRegen);
@@ -467,6 +469,11 @@
     }
 
     function onKeydown(e) {
+        // コマページの編集画面を開いている間は、キー操作をすべて編集画面に任せる
+        if (window.PolarisPages && window.PolarisPages.isOpen()) {
+            window.PolarisPages.keydown(e);
+            return;
+        }
         const viewer = isOpen(".ps-viewer");
         if (viewer && !isOpen(".ps-delete-dialog") && (e.key === "ArrowLeft" || e.key === "ArrowRight")) {
             e.preventDefault();
@@ -552,6 +559,7 @@
     }
 
     function showList() {
+        window.PolarisPages.close();
         closeQueueForm();
         closeQueueManager();
         closeRegenForm();
@@ -568,8 +576,12 @@
 
     function showProject(p) {
         project = p;
-        // Book のない古いデータにも Book を持たせる
+        // Book のない古いデータにも Book を持たせる。画像だけを並べていた古い Book（images）は items にする
         if (!Array.isArray(p.books)) p.books = [];
+        for (const b of p.books) {
+            if (!Array.isArray(b.items)) b.items = Array.isArray(b.images) ? b.images : [];
+            delete b.images;
+        }
         q(".ps-project-title").value = p.title;
         q(".ps-list-view").classList.add("ps-off");
         q(".ps-project-view").classList.remove("ps-off");
@@ -1466,8 +1478,9 @@
     }
 
     // ---------- Book（製本） ----------
-    // Book は画像への参照（{cutId, name}）を Book 内の順序で持つ。画像は複数の Book に入れられる。
-    // Book の画面からは登録解除だけができ、画像の削除はできない。Book を削除しても画像は残る
+    // Book は画像への参照（{cutId, name}）とコマページ（{type: "page", ...}、polaris_pages.js）を Book 内の順序で items に持つ。
+    // 画像は複数の Book に入れられる。Book の画面からは登録解除だけができ、画像の削除はできない。Book を削除しても画像は残る。
+    // コマページの四角にはめ込んだ画像は、Book から登録解除してもコマに残る
 
     let bookId = "";            // Book の画面で開いている Book
     let bookTarget = "";        // 「Book に追加」で前回選んだ Book（"" は新しい Book）
@@ -1475,20 +1488,45 @@
 
     const bookOf = (id) => project.books.find((b) => b.id === id) || null;
     const refKey = (r) => r.cutId + "/" + r.name;
-    // その画像（selKey の形）が入っている Book
-    const booksWith = (key) => project.books.filter((b) => b.images.some((r) => refKey(r) === key));
+    const isPage = (r) => r.type === "page";
+    const imageItems = (book) => book.items.filter((r) => !isPage(r));
+    const pageItems = (book) => book.items.filter(isPage);
+    // コマにはめ込んだ画像の参照
+    const panelRefs = (book) => pageItems(book).flatMap((p) => p.shapes.filter((s) => s.image).map((s) => s.image));
+    // Book が使っている画像（登録した画像とコマの画像）の selKey
+    const bookKeys = (book) => new Set([...imageItems(book), ...panelRefs(book)].map(refKey));
+    // その画像（selKey の形）を使っている Book
+    const booksWith = (key) => project.books.filter((b) => bookKeys(b).has(key));
+    const bookCount = (book) => {
+        const pages = pageItems(book).length;
+        return `${book.items.length - pages} 枚` + (pages ? `・コマページ ${pages}` : "");
+    };
 
-    // 削除する画像が入っている Book を、確認の文に足す
-    function bookWarning(keys) {
-        const hit = project.books.map((b) => ({b, n: b.images.filter((r) => keys.includes(refKey(r))).length})).filter((x) => x.n);
-        if (!hit.length) return "";
-        const n = new Set(keys.filter((k) => booksWith(k).length)).size;
-        return `\n⚠ このうち ${n} 枚は Book（${hit.map((x) => `「${x.b.title}」${x.n} 枚`).join("、")}）に登録されています。削除すると Book からも外れます。`;
+    function findImage(ref) {
+        const cut = cutsOf(project).find((c) => c.id === ref.cutId);
+        const image = cut && imagesOf(project, cut).find((x) => x.name === ref.name);
+        return image ? {cut, image} : null;
     }
 
-    // 消えた画像やカット案を Book から外す
+    // 削除する画像を使っている Book を、確認の文に足す
+    function bookWarning(keys) {
+        const hit = project.books.map((b) => {
+            const used = bookKeys(b);
+            return {b, n: keys.filter((k) => used.has(k)).length};
+        }).filter((x) => x.n);
+        if (!hit.length) return "";
+        const n = new Set(keys.filter((k) => booksWith(k).length)).size;
+        return `\n⚠ このうち ${n} 枚は Book（${hit.map((x) => `「${x.b.title}」${x.n} 枚`).join("、")}）で使われています。削除すると Book から外れ、はめ込んだコマは空になります。`;
+    }
+
+    // 消えた画像やカット案を Book から外し、コマのはめ込みも外す
     function removeFromBooks(match) {
-        for (const b of project.books) b.images = b.images.filter((r) => !match(r));
+        for (const b of project.books) {
+            b.items = b.items.filter((r) => isPage(r) || !match(r));
+            for (const p of pageItems(b)) {
+                for (const s of p.shapes) if (s.image && match(s.image)) s.image = null;
+            }
+        }
     }
 
     function openBookPanel(button) {
@@ -1527,7 +1565,7 @@
         for (const b of project.books) {
             box.appendChild(choice(b.id, [
                 el("span", {class: "ps-book-choice-title", text: b.title}),
-                el("span", {class: "ps-book-choice-count", text: `${b.images.length} 枚`}),
+                el("span", {class: "ps-book-choice-count", text: bookCount(b)}),
             ]));
         }
         const title = el("input", {type: "text", class: "ps-book-new-title", placeholder: "新しい Book のタイトル"});
@@ -1572,14 +1610,14 @@
         let book = bookOf(bookTarget);
         if (!book) {
             const title = q(".ps-book-new-title").value.trim() || `Book ${project.books.length + 1}`;
-            book = {id: newId(), title, images: [], createdAt: new Date().toISOString()};
+            book = {id: newId(), title, items: [], createdAt: new Date().toISOString()};
             project.books.push(book);
             bookTarget = book.id;
         }
         // 後ろに足す。すでに入っている画像は足さない（順序はそのまま）
-        const had = new Set(book.images.map(refKey));
+        const had = new Set(imageItems(book).map(refKey));
         const added = keys.filter((k) => !had.has(k));
-        book.images.push(...added.map((k) => ({cutId: selCutId(k), name: selName(k)})));
+        book.items.push(...added.map((k) => ({cutId: selCutId(k), name: selName(k)})));
         renderBookChoices();
         const head = q(".ps-book-panel-head");
         head.textContent = `「${book.title}」に ${added.length} 枚追加しました` + (added.length < keys.length ? `（${keys.length - added.length} 枚は登録済み）` : "");
@@ -1602,6 +1640,7 @@
     }
 
     function closeBooks() {
+        window.PolarisPages.close();
         q(".ps-books-view").classList.add("ps-off");
         q(".ps-project-view").classList.remove("ps-off");
         renderScenes();
@@ -1619,15 +1658,15 @@
                 renderBooks();
             }}, [
                 el("span", {class: "ps-books-item-title", text: b.title}),
-                el("span", {class: "ps-books-item-count", text: `${b.images.length} 枚`}),
+                el("span", {class: "ps-books-item-count", text: bookCount(b)}),
             ]));
         }
         const book = bookOf(bookId);
         q(".ps-book-main").classList.toggle("ps-off", !book);
         if (!book) return;
         q(".ps-book-title").value = book.title;
-        q(".ps-book-count").textContent = `${book.images.length} 枚`;
-        q(".ps-book-export").disabled = !book.images.length;
+        q(".ps-book-count").textContent = bookCount(book);
+        q(".ps-book-export").disabled = !book.items.length;
         renderBookPages(book);
     }
 
@@ -1636,22 +1675,40 @@
     function renderBookPages(book) {
         const box = q(".ps-book-pages");
         box.textContent = "";
-        if (!book.images.length) box.appendChild(el("div", {class: "mtm-empty", text: "まだ画像がありません。サムネイル一覧で画像を選んで「Book に追加」から登録します。"}));
-        const width = Math.max(3, String(book.images.length).length);
-        book.images.forEach((r, i) => {
-            const cut = cutsOf(project).find((c) => c.id === r.cutId);
-            const image = cut && imagesOf(project, cut).find((x) => x.name === r.name);
-            const page = el("div", {class: "ps-book-page" + (image ? "" : " ps-missing"), draggable: "true", title: `${cut ? cut.title : "（削除済み）"}\n${r.name}`}, [
-                image ? el("img", {src: imageUrl(project, cut, image, true), alt: "", draggable: "false"}) : el("span", {class: "ps-book-missing", text: "画像が見つかりません"}),
-                el("span", {class: "ps-book-no", text: String(i + 1).padStart(width, "0")}),
-                el("span", {class: "ps-book-cut", text: cut ? cut.title : ""}),
-                el("button", {type: "button", class: "mtm-icon ps-book-remove", title: "Book から登録解除（画像は削除しません）", text: "✕", onclick: () => unregisterPage(book, i)}),
-            ]);
-            // クリックでビューワーを開く。Book の順序で前後に移動し、削除はできない
-            page.addEventListener("click", (e) => {
-                if (!image || e.target.closest("button")) return;
-                openViewer(image, cut, book);
-            });
+        if (!book.items.length) box.appendChild(el("div", {class: "mtm-empty", text: "まだ画像がありません。サムネイル一覧で画像を選んで「Book に追加」から登録します。「コマページ作成」で白紙のコマページを足せます。"}));
+        const width = Math.max(3, String(book.items.length).length);
+        book.items.forEach((r, i) => {
+            const no = el("span", {class: "ps-book-no", text: String(i + 1).padStart(width, "0")});
+            let page;
+            if (isPage(r)) {
+                page = el("div", {class: "ps-book-page ps-book-komapage", draggable: "true", title: `コマページ ${r.width} × ${r.height}\nクリックで編集`}, [
+                    window.PolarisPages.thumb(r, (ref) => {
+                        const found = findImage(ref);
+                        return found ? imageUrl(project, found.cut, found.image, true) : null;
+                    }),
+                    no,
+                    el("span", {class: "ps-book-cut", text: "コマページ"}),
+                    el("button", {type: "button", class: "mtm-icon ps-book-remove", title: "コマページを削除（画像は削除しません）", text: "✕", onclick: () => deletePage(book, r)}),
+                ]);
+                page.addEventListener("click", (e) => {
+                    if (!e.target.closest("button")) openPageEditor(book, r);
+                });
+            } else {
+                const found = findImage(r);
+                const cut = found && found.cut;
+                const image = found && found.image;
+                page = el("div", {class: "ps-book-page" + (image ? "" : " ps-missing"), draggable: "true", title: `${cut ? cut.title : "（削除済み）"}\n${r.name}`}, [
+                    image ? el("img", {src: imageUrl(project, cut, image, true), alt: "", draggable: "false"}) : el("span", {class: "ps-book-missing", text: "画像が見つかりません"}),
+                    no,
+                    el("span", {class: "ps-book-cut", text: cut ? cut.title : ""}),
+                    el("button", {type: "button", class: "mtm-icon ps-book-remove", title: "Book から登録解除（画像は削除しません）", text: "✕", onclick: () => unregisterPage(book, i)}),
+                ]);
+                // クリックでビューワーを開く。Book の順序で前後に移動し、削除はできない
+                page.addEventListener("click", (e) => {
+                    if (!image || e.target.closest("button")) return;
+                    openViewer(image, cut, book);
+                });
+            }
             page.addEventListener("dragstart", (e) => {
                 bookDrag = i;
                 e.dataTransfer.effectAllowed = "move";
@@ -1683,20 +1740,63 @@
     // from の画像を to の位置（その前）へ動かす
     async function movePage(book, from, to) {
         if (to === from || to === from + 1) return;
-        const [r] = book.images.splice(from, 1);
-        book.images.splice(to > from ? to - 1 : to, 0, r);
+        const [r] = book.items.splice(from, 1);
+        book.items.splice(to > from ? to - 1 : to, 0, r);
         renderBooks();
         await saveProjects();
     }
 
     async function unregisterPage(book, index) {
-        book.images.splice(index, 1);
+        book.items.splice(index, 1);
         renderBooks();
         await saveProjects();
     }
 
+    // ---------- コマページ（polaris_pages.js） ----------
+
+    // 白紙のコマページを Book の最後に足して、すぐ編集画面を開く
+    async function createPage() {
+        const book = bookOf(bookId);
+        if (!book) return;
+        const page = window.PolarisPages.newPage();
+        book.items.push(page);
+        renderBooks();
+        openPageEditor(book, page);
+        await saveProjects();
+    }
+
+    async function deletePage(book, page) {
+        const n = page.shapes.length;
+        if (n && !confirm(`このコマページを削除しますか？\n描いた ${n} 個の図形も消えます。はめ込んだ画像は削除されません。`)) return;
+        book.items = book.items.filter((r) => r !== page);
+        renderBooks();
+        await saveProjects();
+    }
+
+    function openPageEditor(book, page) {
+        window.PolarisPages.open({
+            host: overlay,
+            page,
+            title: () => `${book.title}  ${book.items.indexOf(page) + 1} / ${book.items.length}`,
+            // はめ込む画像は、この Book に登録した画像から選ぶ
+            images: () => imageItems(book).map((r) => {
+                const found = findImage(r);
+                return found && {cutId: r.cutId, name: r.name, thumb: imageUrl(project, found.cut, found.image, true), label: found.cut.title};
+            }).filter(Boolean),
+            resolve: (ref, thumb) => {
+                const found = findImage(ref);
+                return found ? imageUrl(project, found.cut, found.image, thumb) : null;
+            },
+            onChange: () => saveProjects(),
+            onClose: () => {
+                renderBooks();
+                fs.focus();
+            },
+        });
+    }
+
     async function createBook() {
-        const book = {id: newId(), title: `Book ${project.books.length + 1}`, images: [], createdAt: new Date().toISOString()};
+        const book = {id: newId(), title: `Book ${project.books.length + 1}`, items: [], createdAt: new Date().toISOString()};
         project.books.push(book);
         bookId = book.id;
         renderBooks();
@@ -1715,7 +1815,10 @@
 
     async function deleteBook() {
         const book = bookOf(bookId);
-        if (!book || !confirm(`Book「${book.title}」を削除しますか？\n登録した ${book.images.length} 枚の画像は削除されません。`)) return;
+        if (!book) return;
+        const pages = pageItems(book).length;
+        const pageNote = pages ? `\nコマページ ${pages} 枚は Book と一緒に消えます。` : "";
+        if (!confirm(`Book「${book.title}」を削除しますか？\n登録した ${book.items.length - pages} 枚の画像は削除されません。${pageNote}`)) return;
         project.books.splice(project.books.indexOf(book), 1);
         bookId = (project.books[0] || {}).id || "";
         renderBooks();
@@ -1725,14 +1828,14 @@
     // メタ情報を落とした PNG を、Book 内の順序（001.png …）をファイル名にして ZIP で保存する
     async function exportBook() {
         const book = bookOf(bookId);
-        if (!book || !book.images.length) return;
+        if (!book || !book.items.length) return;
         const button = q(".ps-book-export");
         button.disabled = true;
         button.textContent = "書き出し中…";
         try {
             const res = await fetch("polaris-studio/books/export", {
                 method: "POST", headers: {"Content-Type": "application/json"},
-                body: JSON.stringify({project: project.id, images: book.images}),
+                body: JSON.stringify({project: project.id, items: book.items}),
             });
             if (!res.ok) throw new Error(((await res.json().catch(() => null)) || {}).error || res.status);
             const url = URL.createObjectURL(await res.blob());
@@ -1746,7 +1849,7 @@
             alert("ZIP の書き出しに失敗しました。\n" + e.message);
         }
         button.textContent = "ZIP で書き出し";
-        button.disabled = !book.images.length;
+        button.disabled = !book.items.length;
     }
 
     // ---------- キュー管理（プロジェクト全体） ----------
@@ -2349,12 +2452,8 @@
 
     function viewEntries() {
         if (!viewBook) return visibleImages().map((image) => ({cut: galleryCut, image}));
-        // Book の画像のうち、見つからないものは飛ばす
-        return viewBook.images.map((r) => {
-            const cut = cutsOf(project).find((c) => c.id === r.cutId);
-            const image = cut && imagesOf(project, cut).find((x) => x.name === r.name);
-            return image ? {cut, image} : null;
-        }).filter(Boolean);
+        // Book の画像のうち、見つからないものとコマページは飛ばす
+        return imageItems(viewBook).map(findImage).filter(Boolean);
     }
 
     const isEntry = (x, cut, image) => x.cut.id === cut.id && x.image.name === image.name;

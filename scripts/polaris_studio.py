@@ -14,7 +14,7 @@ import zipfile
 
 from fastapi import Body, Request
 from fastapi.responses import FileResponse, JSONResponse, Response
-from PIL import Image
+from PIL import Image, ImageDraw
 
 from modules import images, script_callbacks, scripts, shared
 from modules.infotext_utils import parse_generation_parameters
@@ -139,22 +139,121 @@ def _sanitize_project(raw):
     }
 
 
-# Book は画像への参照（カット案の id と画像の名前）を並び順に持つ。画像そのものは持たない。
-# 同じ画像は 1 つの Book に 1 回だけ。カット案がなくなった画像は外す
+# Book は「画像への参照（カット案の id と画像の名前）」と「コマページ」を並び順に持つ。画像そのものは持たない。
+# 同じ画像は 1 つの Book に 1 回だけ。カット案がなくなった画像は外す。
+# 古いデータの images（画像だけの並び）は items として読む
 def _sanitize_book(raw, cut_ids):
-    refs = []
+    items = []
     seen = set()
-    for x in _dicts(raw.get("images")):
-        ref = (str(x.get("cutId", "")), os.path.basename(str(x.get("name", ""))))
-        if ref[0] in cut_ids and ref[1] and ref not in seen:
-            seen.add(ref)
-            refs.append({"cutId": ref[0], "name": ref[1]})
+    source = raw.get("items") if isinstance(raw.get("items"), list) else raw.get("images")
+    for x in _dicts(source):
+        if x.get("type") == "page":
+            items.append(_sanitize_page(x, cut_ids))
+            continue
+        ref = _image_ref(x, cut_ids)
+        if ref and (ref["cutId"], ref["name"]) not in seen:
+            seen.add((ref["cutId"], ref["name"]))
+            items.append(ref)
     return {
         "id": _safe_id(raw.get("id")),
         "title": str(raw.get("title", "")).strip() or "無題の Book",
-        "images": refs,
+        "items": items,
         "createdAt": str(raw.get("createdAt", "")),
     }
+
+
+# cut_ids が None のときはカット案の有無を見ない（書き出しのとき。画像のパスは image_path で確かめる）
+def _image_ref(raw, cut_ids):
+    cut = str(raw.get("cutId", ""))
+    name = os.path.basename(str(raw.get("name", "")))
+    if not name or (cut_ids is not None and cut not in cut_ids):
+        return None
+    return {"cutId": cut, "name": name}
+
+
+# ---------- コマページ ----------
+# 白紙のページに直線と四角を置く。四角には画像の一部（クロップ範囲）をはめ込める。
+# 座標はすべてページのピクセル。四角の線は四角の内側に描き、画像は四角いっぱいに置く
+
+PAGE_WIDTH = 1573
+PAGE_HEIGHT = 2200
+PAGE_SIZE_MIN = 64
+PAGE_SIZE_MAX = 8192
+PAGE_STROKES = (0, 4, 8, 12, 16, 24)    # 0 は線なし（四角だけ）
+
+
+def _number(value, default=0.0):
+    try:
+        value = float(value)
+    except (TypeError, ValueError):
+        return default
+    if value != value or abs(value) > PAGE_SIZE_MAX * 4:
+        return default
+    return round(value, 1)
+
+
+def _page_size(value, default):
+    try:
+        return min(max(int(value), PAGE_SIZE_MIN), PAGE_SIZE_MAX)
+    except (TypeError, ValueError):
+        return default
+
+
+def _stroke(value, allow_none):
+    try:
+        value = int(value)
+    except (TypeError, ValueError):
+        value = 4
+    if value not in PAGE_STROKES or (value == 0 and not allow_none):
+        return 4
+    return value
+
+
+def _sanitize_page(raw, cut_ids):
+    shapes = []
+    for s in _dicts(raw.get("shapes")):
+        if s.get("type") == "line":
+            shapes.append({
+                "id": _safe_id(s.get("id")),
+                "type": "line",
+                **{k: _number(s.get(k)) for k in ("x1", "y1", "x2", "y2")},
+                "stroke": _stroke(s.get("stroke"), False),
+            })
+        elif s.get("type") == "rect":
+            w, h = _number(s.get("w")), _number(s.get("h"))
+            if w < 1 or h < 1:
+                continue
+            shapes.append({
+                "id": _safe_id(s.get("id")),
+                "type": "rect",
+                "x": _number(s.get("x")),
+                "y": _number(s.get("y")),
+                "w": w,
+                "h": h,
+                "stroke": _stroke(s.get("stroke"), True),
+                "image": _sanitize_panel_image(s.get("image"), cut_ids),
+            })
+    return {
+        "type": "page",
+        "id": _safe_id(raw.get("id")),
+        "width": _page_size(raw.get("width"), PAGE_WIDTH),
+        "height": _page_size(raw.get("height"), PAGE_HEIGHT),
+        "shapes": shapes,
+    }
+
+
+# 四角にはめ込んだ画像。iw・ih はクロップしたときの画像の大きさ、crop はその画像の中の範囲（ピクセル）。
+# 元の画像には手を加えない
+def _sanitize_panel_image(raw, cut_ids):
+    if not isinstance(raw, dict):
+        return None
+    ref = _image_ref(raw, cut_ids)
+    crop = raw.get("crop") if isinstance(raw.get("crop"), dict) else {}
+    iw, ih = _number(raw.get("iw")), _number(raw.get("ih"))
+    cw, ch = _number(crop.get("w")), _number(crop.get("h"))
+    if not ref or iw < 1 or ih < 1 or cw < 1 or ch < 1:
+        return None
+    return {**ref, "iw": iw, "ih": ih, "crop": {"x": _number(crop.get("x")), "y": _number(crop.get("y")), "w": cw, "h": ch}}
 
 
 def _sanitize_scene(raw):
@@ -379,19 +478,72 @@ def clean_png(path):
     return out.getvalue()
 
 
-def book_zip(project, refs):
-    paths = [image_path(project, r.get("cutId"), r.get("name")) for r in refs if isinstance(r, dict)]
-    paths = [p for p in paths if os.path.isfile(p)]
-    if not paths:
+# はめ込む範囲。四角と縦横比が違うときは、範囲の中央を四角の縦横比で切り出す（画面の表示と同じ）
+def fitted_crop(crop, w, h):
+    x, y, cw, ch = crop["x"], crop["y"], crop["w"], crop["h"]
+    if cw / ch > w / h:
+        nw = ch * w / h
+        x, cw = x + (cw - nw) / 2, nw
+    else:
+        nh = cw * h / w
+        y, ch = y + (ch - nh) / 2, nh
+    return x, y, cw, ch
+
+
+# コマページを 1 枚の画像にする。白地に画像を置き、その上に四角の線と直線を描く。
+# 見つからない画像の四角は空けておく
+def render_page(project, page):
+    canvas = Image.new("RGB", (page["width"], page["height"]), "white")
+    for s in page["shapes"]:
+        ref = s.get("image") if s["type"] == "rect" else None
+        if not ref:
+            continue
+        path = image_path(project, ref["cutId"], ref["name"])
+        if not os.path.isfile(path):
+            continue
+        with Image.open(path) as src:
+            src = src.convert("RGBA")
+        # クロップした後で画像の大きさが変わっていても、同じ割合の範囲を使う
+        sx, sy = src.width / ref["iw"], src.height / ref["ih"]
+        x, y, cw, ch = fitted_crop(ref["crop"], s["w"], s["h"])
+        box = (round(x * sx), round(y * sy), round((x + cw) * sx), round((y + ch) * sy))
+        size = (max(1, round(s["w"])), max(1, round(s["h"])))
+        part = src.crop(box).resize(size, Image.LANCZOS)
+        canvas.paste(part, (round(s["x"]), round(s["y"])), part)
+    draw = ImageDraw.Draw(canvas)
+    for s in page["shapes"]:
+        if s["type"] == "rect" and s["stroke"]:
+            x0, y0 = round(s["x"]), round(s["y"])
+            draw.rectangle((x0, y0, x0 + round(s["w"]) - 1, y0 + round(s["h"]) - 1), outline="black", width=s["stroke"])
+        elif s["type"] == "line":
+            draw.line(((s["x1"], s["y1"]), (s["x2"], s["y2"])), fill="black", width=s["stroke"])
+    out = io.BytesIO()
+    canvas.save(out, "PNG")
+    return out.getvalue()
+
+
+# items は Book の並び（画像の参照とコマページ）。見つからない画像は飛ばす。コマページは 1 枚の画像にする
+def book_zip(project, items):
+    pages = []
+    for item in _dicts(items):
+        if item.get("type") == "page":
+            page = _sanitize_page(item, None)
+            pages.append(lambda page=page: render_page(project, page))
+            continue
+        ref = _image_ref(item, None)
+        path = ref and image_path(project, ref["cutId"], ref["name"])
+        if path and os.path.isfile(path):
+            pages.append(lambda path=path: clean_png(path))
+    if not pages:
         raise ValueError("書き出す画像がありません")
-    width = max(3, len(str(len(paths))))
+    width = max(3, len(str(len(pages))))
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
-        for i, path in enumerate(paths, 1):
+        for i, make in enumerate(pages, 1):
             # 日時も手がかりにならないよう固定にする
             info = zipfile.ZipInfo(f"{i:0{width}d}.png", date_time=(1980, 1, 1, 0, 0, 0))
             info.compress_type = zipfile.ZIP_DEFLATED
-            z.writestr(info, clean_png(path))
+            z.writestr(info, make())
     return buf.getvalue()
 
 
@@ -536,11 +688,11 @@ def on_app_started(demo, app):
             return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
         return {"ok": True, **data}
 
-    # Book の画像を並び順に ZIP にして返す。ファイル名は JS 側で Book のタイトルから付ける
+    # Book の画像とコマページを並び順に ZIP にして返す。ファイル名は JS 側で Book のタイトルから付ける
     @app.post("/polaris-studio/books/export")
     def export_book(payload: dict = Body(...)):
         try:
-            data = book_zip(payload.get("project"), payload.get("images") or [])
+            data = book_zip(payload.get("project"), payload.get("items") or payload.get("images") or [])
         except Exception as e:
             return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
         return Response(data, media_type="application/zip")

@@ -2272,3 +2272,289 @@ body.mtm-fs-open {
     background: rgba(0, 0, 0, 0.55);
     color: #fff;
 }
+
+/* ---------- コマページ（polaris_pages.js） ---------- */
+
+.ps-book-komapage {
+    background: #8a8a8a;
+}
+
+.ps-pg-thumb {
+    display: block;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+}
+
+.ps-page-view {
+    z-index: 12;
+}
+
+.ps-pg-tools {
+    flex: none;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 14px 4px;
+}
+
+.ps-pg-group {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+}
+
+.ps-pg-label {
+    margin-right: 4px;
+    font-size: 12px;
+    color: var(--body-text-color-subdued);
+}
+
+#mtm-fs .ps-pg-strokes .mtm-btn {
+    min-width: 34px;
+    padding-left: 6px;
+    padding-right: 6px;
+}
+
+.ps-pg-size {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 12px;
+    color: var(--body-text-color-subdued);
+}
+
+#mtm-fs .ps-pg-size input {
+    width: 78px;
+    padding: 3px 6px;
+}
+
+.ps-pg-hint {
+    flex: none;
+    padding: 0 14px 8px;
+    border-bottom: 1px solid var(--border-color-primary);
+    font-size: 11px;
+    color: var(--body-text-color-subdued);
+}
+
+.ps-pg-stage {
+    flex: 1;
+    min-height: 0;
+    position: relative;
+    background: #5c5c5c;
+}
+
+.ps-pg-svg {
+    position: absolute;
+    inset: 8px;
+    width: calc(100% - 16px);
+    height: calc(100% - 16px);
+    user-select: none;
+    touch-action: none;
+}
+
+.ps-pg-stage[data-tool="line"] .ps-pg-svg,
+.ps-pg-stage[data-tool="rect"] .ps-pg-svg {
+    cursor: crosshair;
+}
+
+.ps-pg-empty {
+    fill: rgba(80, 120, 255, 0.07);
+}
+
+.ps-pg-empty-text {
+    fill: rgba(60, 80, 140, 0.55);
+    font-family: sans-serif;
+    pointer-events: none;
+}
+
+/* 線のない四角は、編集画面でだけ点線で見せる */
+.ps-pg-ghost {
+    fill: none;
+    stroke: #6b8cff;
+    stroke-width: 1.5px;
+    stroke-dasharray: 6 4;
+    vector-effect: non-scaling-stroke;
+}
+
+.ps-pg-hits rect {
+    fill: transparent;
+}
+
+.ps-pg-hits line {
+    stroke: transparent;
+}
+
+.ps-pg-stage[data-tool="select"] .ps-pg-hits > * {
+    cursor: move;
+}
+
+.ps-pg-sel-outline {
+    fill: none;
+    stroke: var(--color-accent, #ff7c00);
+    stroke-width: 2px;
+    stroke-dasharray: 6 3;
+    vector-effect: non-scaling-stroke;
+    pointer-events: none;
+}
+
+.ps-pg-handle {
+    fill: #fff;
+    stroke: var(--color-accent, #ff7c00);
+    stroke-width: 1.5px;
+    vector-effect: non-scaling-stroke;
+}
+
+.ps-pg-stage[data-tool="line"] .ps-pg-sel,
+.ps-pg-stage[data-tool="rect"] .ps-pg-sel {
+    pointer-events: none;
+}
+
+.ps-pg-handle-nw, .ps-pg-handle-se { cursor: nwse-resize; }
+.ps-pg-handle-ne, .ps-pg-handle-sw { cursor: nesw-resize; }
+.ps-pg-handle-n, .ps-pg-handle-s { cursor: ns-resize; }
+.ps-pg-handle-e, .ps-pg-handle-w { cursor: ew-resize; }
+.ps-pg-handle-p1, .ps-pg-handle-p2 { cursor: crosshair; }
+
+/* 画像の選択とクロップ */
+.ps-pg-crop {
+    position: absolute;
+    inset: 0;
+    z-index: 5;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+    background: rgba(0, 0, 0, 0.5);
+}
+
+.ps-pg-crop-box {
+    box-sizing: border-box;
+    width: min(1100px, 100%);
+    height: min(860px, 100%);
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 14px;
+    border: 1px solid var(--border-color-primary);
+    border-radius: 10px;
+    background: var(--background-fill-primary);
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
+}
+
+.ps-pg-crop-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 12px;
+}
+
+.ps-pg-crop-title {
+    font-size: 15px;
+    font-weight: 600;
+}
+
+.ps-pg-crop-info {
+    font-size: 12px;
+    color: var(--body-text-color-subdued);
+}
+
+.ps-pg-pickgrid {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+    grid-auto-rows: max-content;
+    gap: 8px;
+}
+
+.ps-pg-pickgrid > .mtm-empty {
+    grid-column: 1 / -1;
+}
+
+.ps-pg-pickitem {
+    position: relative;
+    aspect-ratio: 3 / 4;
+    padding: 0;
+    border: 2px solid var(--border-color-primary);
+    border-radius: 6px;
+    overflow: hidden;
+    background: var(--background-fill-secondary);
+    cursor: pointer;
+}
+
+.ps-pg-pickitem:hover,
+.ps-pg-pickitem.ps-on {
+    border-color: var(--color-accent);
+}
+
+.ps-pg-pickitem img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.ps-pg-pickitem-label {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    padding: 2px 6px;
+    background: rgba(0, 0, 0, 0.55);
+    color: #fff;
+    font-size: 11px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.ps-pg-cropstage {
+    flex: 1;
+    min-height: 0;
+    position: relative;
+    overflow: hidden;
+    border-radius: 6px;
+    background: #222;
+    user-select: none;
+}
+
+.ps-pg-cropimg {
+    position: absolute;
+    max-width: none;
+    pointer-events: none;
+}
+
+.ps-pg-frame {
+    position: absolute;
+    box-sizing: border-box;
+    border: 2px solid #fff;
+    outline: 1px solid rgba(0, 0, 0, 0.6);
+    box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.55);
+    cursor: move;
+    touch-action: none;
+}
+
+.ps-pg-fh {
+    position: absolute;
+    width: 14px;
+    height: 14px;
+    border: 2px solid var(--color-accent, #ff7c00);
+    border-radius: 2px;
+    background: #fff;
+}
+
+.ps-pg-fh-nw { left: -9px; top: -9px; cursor: nwse-resize; }
+.ps-pg-fh-ne { right: -9px; top: -9px; cursor: nesw-resize; }
+.ps-pg-fh-se { right: -9px; bottom: -9px; cursor: nwse-resize; }
+.ps-pg-fh-sw { left: -9px; bottom: -9px; cursor: nesw-resize; }
+
+.ps-pg-crop-note {
+    flex: 1;
+}
+
+.ps-pg-crop-note.ps-pg-warn {
+    color: #e0a000;
+    font-weight: 600;
+}
