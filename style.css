@@ -467,12 +467,66 @@ body.mtm-fs-open {
     color: var(--body-text-color-subdued);
 }
 
+.ps-tile-foot {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding-right: 8px;
+}
+
 .ps-tile-title {
+    flex: 1;
+    min-width: 0;
     padding: 8px 10px;
     font-weight: 600;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+}
+
+/* プロジェクトの削除（一覧だけに置く）。目立たせず、押せることだけ分かるように */
+.ps-tile-delete {
+    flex: none;
+    padding: 1px 7px;
+    border: 1px solid var(--border-color-primary);
+    border-radius: 5px;
+    color: var(--body-text-color-subdued);
+    font-size: 11px;
+    line-height: 16px;
+}
+
+.ps-tile-delete:hover {
+    border-color: #dc2626;
+    background: #dc2626;
+    color: #fff;
+}
+
+/* 削除の前に語を入力させる欄 */
+.ps-delete-confirm {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    font-size: 13px;
+}
+
+.ps-delete-confirm.ps-off {
+    display: none;
+}
+
+#mtm-fs .ps-delete-word {
+    padding: 6px 8px;
+    border: 1px solid var(--border-color-primary);
+    border-radius: 6px;
+    background: var(--input-background-fill);
+    color: var(--body-text-color);
+    font-family: var(--font-mono), monospace;
+    font-size: 14px;
+    letter-spacing: 0.08em;
+}
+
+#mtm-fs .ps-delete-ok:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
 }
 
 #mtm-fs .ps-project-title {

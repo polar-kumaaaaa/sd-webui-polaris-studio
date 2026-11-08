@@ -123,7 +123,6 @@
                     <button type="button" class="mtm-btn ps-open-cover">カバー画像</button>
                     <button type="button" class="mtm-btn ps-open-books">📖 Book</button>
                     <button type="button" class="mtm-btn ps-open-queues">▶ キュー管理</button>
-                    <button type="button" class="mtm-btn mtm-danger ps-delete-project">プロジェクトを削除</button>
                 </div>
                 <div class="ps-scenes">
                     <div class="ps-scene-list"></div>
@@ -311,6 +310,10 @@
                     <div class="ps-dialog-head ps-delete-title"></div>
                     <div class="ps-confirm-text ps-delete-text"></div>
                     <div class="ps-path ps-delete-path"></div>
+                    <label class="ps-delete-confirm ps-off">
+                        <span class="ps-delete-confirm-text"></span>
+                        <input type="text" class="ps-delete-word" autocomplete="off" spellcheck="false" autocapitalize="off">
+                    </label>
                     <div class="mtm-form-actions">
                         <button type="button" class="mtm-btn ps-delete-cancel">キャンセル</button>
                         <button type="button" class="mtm-btn mtm-danger ps-delete-ok">削除</button>
@@ -329,7 +332,6 @@
             if (e.key === "Enter") createProject();
         });
         q(".ps-project-title").addEventListener("change", renameProject);
-        q(".ps-delete-project").addEventListener("click", askDeleteProject);
         q(".ps-add-scene").addEventListener("click", addScene);
         q(".ps-open-cover").addEventListener("click", openCoverDialog);
         q(".ps-cover-close").addEventListener("click", () => hide(".ps-cover-dialog"));
@@ -337,10 +339,10 @@
         q(".ps-key-close").addEventListener("click", () => hide(".ps-key-dialog"));
         q(".ps-key-reset").addEventListener("click", () => setKeyImage(keyCut, ""));
         q(".ps-delete-cancel").addEventListener("click", closeDeleteDialog);
-        q(".ps-delete-ok").addEventListener("click", () => {
-            const run = pendingDelete;
-            closeDeleteDialog();
-            run();
+        q(".ps-delete-ok").addEventListener("click", runDelete);
+        q(".ps-delete-word").addEventListener("input", updateDeleteOk);
+        q(".ps-delete-word").addEventListener("keydown", (e) => {
+            if (e.key === "Enter" && !e.isComposing) runDelete();
         });
         q(".ps-queue-back").addEventListener("click", closeQueueForm);
         q(".ps-queue-save").addEventListener("click", registerQueue);
@@ -618,7 +620,14 @@
         for (const p of projects) {
             grid.appendChild(el("button", {type: "button", class: "ps-tile", onclick: () => showProject(p)}, [
                 makeCover(p),
-                el("div", {class: "ps-tile-title", title: p.title, text: p.title}),
+                el("div", {class: "ps-tile-foot"}, [
+                    el("div", {class: "ps-tile-title", title: p.title, text: p.title}),
+                    // プロジェクトの削除はこの一覧からだけできる（作業中にうっかり押さないよう、個別の画面には置かない）
+                    el("span", {class: "ps-tile-delete", role: "button", title: "プロジェクトを削除", text: "削除", onclick: (e) => {
+                        e.stopPropagation();
+                        askDeleteProject(p);
+                    }}),
+                ]),
             ]));
         }
     }
@@ -2730,17 +2739,41 @@
 
     // ---------- 削除の確認 ----------
 
-    function askDelete(title, text, path, run) {
+    const DELETE_WORD = "DELETE";
+    let deleteWord = "";    // 削除の前に入力してもらう語（"" なら入力なしで削除できる）
+
+    // word を渡すと、その語を入力するまで「削除」を押せない（マウスだけで削除してしまわないように）
+    function askDelete(title, text, path, run, word = "") {
         q(".ps-delete-title").textContent = title;
         q(".ps-delete-text").textContent = text;
         q(".ps-delete-path").textContent = path;
         pendingDelete = run;
+        deleteWord = word;
+        const input = q(".ps-delete-word");
+        input.value = "";
+        input.placeholder = word;
+        q(".ps-delete-confirm-text").textContent = `確認のため、半角大文字で ${word} と入力してください。`;
+        q(".ps-delete-confirm").classList.toggle("ps-off", !word);
+        updateDeleteOk();
         q(".ps-delete-dialog").classList.remove("ps-off");
+        if (word) input.focus();
+    }
+
+    function updateDeleteOk() {
+        q(".ps-delete-ok").disabled = !!deleteWord && q(".ps-delete-word").value !== deleteWord;
+    }
+
+    function runDelete() {
+        const run = pendingDelete;
+        if (!run || q(".ps-delete-ok").disabled) return;
+        closeDeleteDialog();
+        run();
     }
 
     function closeDeleteDialog() {
         hide(".ps-delete-dialog");
         pendingDelete = null;
+        deleteWord = "";
     }
 
     // ごみ箱に移せるなら、そこから戻せると伝える
@@ -2768,24 +2801,25 @@
         });
     }
 
-    function askDeleteProject() {
-        const cuts = cutsOf(project);
-        const count = cuts.reduce((n, c) => n + imagesOf(project, c).length, 0);
-        const books = (project.books || []).length;
+    // プロジェクト一覧から呼ぶ。p は削除するプロジェクト
+    function askDeleteProject(p) {
+        const cuts = cutsOf(p);
+        const count = cuts.reduce((n, c) => n + imagesOf(p, c).length, 0);
+        const books = (p.books || []).length;
         const bookNote = books ? `\n⚠ Book ${books} 件も一緒に削除されます。` : "";
-        askDelete("プロジェクトを削除", `カット案 ${cuts.length} 件と画像 ${count} 枚を実ファイルごと削除します。${backupNote()}${bookNote}`, pathOf(project.id), async () => {
+        askDelete(`プロジェクト「${p.title}」を削除`, `カット案 ${cuts.length} 件と画像 ${count} 枚を実ファイルごと削除します。${backupNote()}${bookNote}`, pathOf(p.id), async () => {
             try {
-                await postJson("polaris-studio/folder/delete", {project: project.id});
+                await postJson("polaris-studio/folder/delete", {project: p.id});
             } catch (e) {
                 alert("プロジェクトの画像を削除できませんでした。\n" + e);
                 return;
             }
-            projects.splice(projects.indexOf(project), 1);
-            projectImages.delete(project.id);
-            showList();
+            projects.splice(projects.indexOf(p), 1);
+            projectImages.delete(p.id);
+            renderList();
             loadI2i();
             await saveProjects();
-        });
+        }, DELETE_WORD);
     }
 
     // ---------- 画像のドロップ ----------
