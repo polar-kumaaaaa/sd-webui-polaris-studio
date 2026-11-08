@@ -20,7 +20,7 @@
     const PREFS_KEY = "polaris-studio:page-tools";
     const RECT_HANDLES = ["nw", "n", "ne", "e", "se", "s", "sw", "w"];
     const HINTS = {
-        select: "クリックで選択、ドラッグで移動・サイズ変更。選んだ四角をもう一度クリック（またはダブルクリック）すると画像を選べます。Delete で削除、Ctrl+Z で元に戻す。Alt を押している間は吸着しません。",
+        select: "クリックで選択、ドラッグで移動・サイズ変更。選んだ四角をもう一度クリック（またはダブルクリック）すると画像を選べます。Delete で削除、Ctrl+Z で元に戻す。Alt を押している間は吸着しません。重なったコマは「下を隠す」(H) で手前のコマだけの線にし、「前面へ」(])「背面へ」([) で手前にするコマを決めます。",
         line: "ドラッグで直線を引きます。Shift で水平・垂直。直線は分割線で、画像ははめ込めません。",
         rect: "ドラッグで四角を描きます。Shift で正方形。線「なし」にすると透明な四角（線のないコマ）になります。",
     };
@@ -69,11 +69,17 @@
         return {x: c.x + c.w / 2 - w / 2, y: c.y + c.h / 2 - h / 2, w, h};
     }
 
-    // ページを g に描く。resolve(ref) は画像の URL（見つからなければ null）。editing では空の四角や線のない四角の目印も描く
+    // 下を隠す四角が、実際に後ろを隠すか。画像も線もない四角（配置の目安の透明な四角）は何も隠さない
+    const hides = (s) => s.type === "rect" && s.front && (s.image || s.stroke);
+
+    // ページを g に描く。resolve(ref) は画像の URL（見つからなければ null）。editing では空の四角や線のない四角の目印も描く。
+    // 重なりの描き方（サーバーの render_page と同じ）：
+    //   1. 「下を隠す」でない四角の画像を、いちばん下にまとめて描く
+    //   2. 図形の並び順（後ろほど手前）に、線と直線を描く。「下を隠す」四角はその位置で白地・画像・線をまとめて描き、
+    //      それより奥のものを隠す。なので「下を隠す」でない四角どうしは両方の線が見え、隠す四角では手前の線だけが見える
     function drawPage(g, page, resolve, editing) {
         g.appendChild(svgEl("rect", {x: 0, y: 0, width: page.width, height: page.height, fill: "#fff"}));
-        for (const s of page.shapes) {
-            if (s.type !== "rect") continue;
+        const content = (s) => {
             const url = s.image && resolve(s.image);
             if (url) {
                 const c = panelCrop(s.image, s.w, s.h);
@@ -91,8 +97,13 @@
                     }));
                 }
             }
+        };
+        for (const s of page.shapes) {
+            if (s.type === "rect" && !s.front) content(s);
         }
         for (const s of page.shapes) {
+            if (hides(s)) g.appendChild(svgEl("rect", {x: s.x, y: s.y, width: s.w, height: s.h, fill: "#fff"}));
+            if (s.type === "rect" && s.front) content(s);
             if (s.type === "rect" && s.stroke) {
                 g.appendChild(svgEl("rect", {
                     x: s.x + s.stroke / 2, y: s.y + s.stroke / 2,
@@ -174,6 +185,11 @@
                     ${STROKES.map((w) => `<button type="button" class="mtm-btn" data-stroke="${w}" title="${w ? w + " px" : "線なし（透明な四角）"}">${w || "なし"}</button>`).join("")}
                 </div>
                 <button type="button" class="mtm-btn ps-pg-pick" title="選んだ四角にはめ込む画像を選びます">画像を選ぶ</button>
+                <div class="ps-pg-group">
+                    <button type="button" class="mtm-btn ps-pg-front" title="重なったとき、このコマで後ろのコマ（画像と線）を隠します。オフなら両方の線を描きます (H)">下を隠す</button>
+                    <button type="button" class="mtm-btn ps-pg-raise" title="いちばん手前に出します (])">前面へ</button>
+                    <button type="button" class="mtm-btn ps-pg-lower" title="いちばん奥に下げます ([)">背面へ</button>
+                </div>
                 <button type="button" class="mtm-btn mtm-danger ps-pg-delete" title="選んだ図形を削除します (Delete)">削除</button>
                 <span class="mtm-fs-spacer"></span>
                 <label class="ps-pg-size">キャンバス
@@ -227,6 +243,9 @@
             if (s && s.type === "rect") openPicker(s);
         });
         q(".ps-pg-delete").addEventListener("click", deleteSelected);
+        q(".ps-pg-front").addEventListener("click", toggleFront);
+        q(".ps-pg-raise").addEventListener("click", () => reorder(true));
+        q(".ps-pg-lower").addEventListener("click", () => reorder(false));
         q(".ps-pg-resize").addEventListener("click", resizeCanvas);
         for (const sel of [".ps-pg-w", ".ps-pg-h"]) {
             q(sel).addEventListener("keydown", (e) => {
@@ -339,6 +358,26 @@
         render();
     }
 
+    // 選んだ四角で、重なった後ろのコマを隠すかどうか
+    function toggleFront() {
+        const s = selected();
+        if (!s || s.type !== "rect") return;
+        change(() => {
+            if (s.front) delete s.front;
+            else s.front = true;
+        });
+    }
+
+    // 選んだ図形をいちばん手前（top）か、いちばん奥へ。手前のものほど重なったときに優先される
+    function reorder(top) {
+        const s = selected();
+        if (!s) return;
+        change(() => {
+            const rest = ed.page.shapes.filter((x) => x !== s);
+            ed.page.shapes = top ? [...rest, s] : [s, ...rest];
+        });
+    }
+
     function deleteSelected() {
         const s = selected();
         if (!s) return;
@@ -375,6 +414,12 @@
         });
         q(".ps-pg-pick").disabled = !s || s.type !== "rect";
         q(".ps-pg-delete").disabled = !s;
+        const front = q(".ps-pg-front");
+        front.disabled = !s || s.type !== "rect";
+        front.classList.toggle("mtm-active", !!(s && s.front));
+        const shapes = ed.page.shapes;
+        q(".ps-pg-raise").disabled = !s || shapes[shapes.length - 1] === s;
+        q(".ps-pg-lower").disabled = !s || shapes[0] === s;
         q(".ps-pg-undo").disabled = !ed.undo.length;
         q(".ps-pg-redo").disabled = !ed.redo.length;
         if (document.activeElement !== q(".ps-pg-w")) q(".ps-pg-w").value = ed.page.width;
@@ -728,6 +773,12 @@
         } else if (key === "v" || key === "l" || key === "r") {
             stop();
             setTool({v: "select", l: "line", r: "rect"}[key]);
+        } else if (key === "h" && selected()) {
+            stop();
+            toggleFront();
+        } else if ((e.key === "]" || e.key === "[") && selected()) {
+            stop();
+            reorder(e.key === "]");
         } else if (e.key === "Enter" && selected() && selected().type === "rect") {
             stop();
             openPicker(selected());

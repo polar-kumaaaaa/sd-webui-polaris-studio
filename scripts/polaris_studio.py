@@ -231,6 +231,8 @@ def _sanitize_page(raw, cut_ids):
                 "w": w,
                 "h": h,
                 "stroke": _stroke(s.get("stroke"), True),
+                # 重なったとき、この四角で後ろのコマ（画像と線）を隠す
+                **({"front": True} if s.get("front") is True else {}),
                 "image": _sanitize_panel_image(s.get("image"), cut_ids),
             })
     return {
@@ -502,29 +504,40 @@ def panel_crop(ref, w, h):
     return c["x"] + c["w"] / 2 - w / 2, c["y"] + c["h"] / 2 - h / 2, w, h
 
 
-# コマページを 1 枚の画像にする。白地に画像を置き、その上に四角の線と直線を描く。
-# 見つからない画像の四角は空けておく
+def _paste_panel(canvas, project, s):
+    ref = s.get("image")
+    if not ref:
+        return
+    path = image_path(project, ref["cutId"], ref["name"])
+    if not os.path.isfile(path):
+        return
+    with Image.open(path) as src:
+        src = src.convert("RGBA")
+    # クロップした後で画像の大きさが変わっていても、同じ割合の範囲を使う
+    sx, sy = src.width / ref["iw"], src.height / ref["ih"]
+    x, y, cw, ch = panel_crop(ref, s["w"], s["h"])
+    # 画像からはみ出した範囲は透明になり、白地がそのまま余白として残る
+    box = (round(x * sx), round(y * sy), round((x + cw) * sx), round((y + ch) * sy))
+    size = (max(1, round(s["w"])), max(1, round(s["h"])))
+    part = src.crop(box).resize(size, Image.LANCZOS)
+    canvas.paste(part, (round(s["x"]), round(s["y"])), part)
+
+
+# コマページを 1 枚の画像にする。見つからない画像の四角は空けておく。重なりの描き方は JS の drawPage と同じ：
+#   1. 「下を隠す」（front）でない四角の画像を、いちばん下にまとめて置く
+#   2. 図形の並び順（後ろほど手前）に線と直線を描く。「下を隠す」四角はその位置で白地・画像・線をまとめて描き、奥のものを隠す。
+#      画像も線もない「下を隠す」四角は何も隠さない
 def render_page(project, page):
     canvas = Image.new("RGB", (page["width"], page["height"]), "white")
     for s in page["shapes"]:
-        ref = s.get("image") if s["type"] == "rect" else None
-        if not ref:
-            continue
-        path = image_path(project, ref["cutId"], ref["name"])
-        if not os.path.isfile(path):
-            continue
-        with Image.open(path) as src:
-            src = src.convert("RGBA")
-        # クロップした後で画像の大きさが変わっていても、同じ割合の範囲を使う
-        sx, sy = src.width / ref["iw"], src.height / ref["ih"]
-        x, y, cw, ch = panel_crop(ref, s["w"], s["h"])
-        # 画像からはみ出した範囲は透明になり、白地がそのまま余白として残る
-        box = (round(x * sx), round(y * sy), round((x + cw) * sx), round((y + ch) * sy))
-        size = (max(1, round(s["w"])), max(1, round(s["h"])))
-        part = src.crop(box).resize(size, Image.LANCZOS)
-        canvas.paste(part, (round(s["x"]), round(s["y"])), part)
+        if s["type"] == "rect" and not s.get("front"):
+            _paste_panel(canvas, project, s)
     draw = ImageDraw.Draw(canvas)
     for s in page["shapes"]:
+        if s["type"] == "rect" and s.get("front") and (s.get("image") or s["stroke"]):
+            x0, y0 = round(s["x"]), round(s["y"])
+            draw.rectangle((x0, y0, x0 + round(s["w"]) - 1, y0 + round(s["h"]) - 1), fill="white")
+            _paste_panel(canvas, project, s)
         if s["type"] == "rect" and s["stroke"]:
             x0, y0 = round(s["x"]), round(s["y"])
             draw.rectangle((x0, y0, x0 + round(s["w"]) - 1, y0 + round(s["h"]) - 1), outline="black", width=s["stroke"])
