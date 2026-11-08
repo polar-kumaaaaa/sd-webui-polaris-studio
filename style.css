@@ -2002,17 +2002,50 @@ body.mtm-fs-open {
     white-space: pre-line;
 }
 
-/* サムネイルの Book の印 */
-.ps-thumb-book {
+/* サムネイルの Book の印とコマの印（左下に並べる） */
+.ps-thumb-marks {
     position: absolute;
     left: 5px;
     bottom: 5px;
+    display: flex;
+    gap: 4px;
+    pointer-events: none;
+}
+
+.ps-thumb-marks > span {
+    pointer-events: auto;
+}
+
+.ps-thumb-book {
     padding: 0 5px;
     border-radius: 8px;
     background: rgba(0, 0, 0, 0.6);
     color: #fff;
     font-size: 11px;
     line-height: 17px;
+}
+
+/* コマで使っている印。Book の印と見分けられるようアクセント色にする */
+.ps-thumb-panel {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    height: 17px;
+    padding: 0 5px;
+    border-radius: 8px;
+    background: #c2410c;
+    color: #fff;
+    font-size: 11px;
+    font-weight: 600;
+    line-height: 17px;
+}
+
+.ps-thumb-panel svg {
+    width: 12px;
+    height: 12px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.5;
 }
 
 /* Book に追加（サムネイル一覧のボタンの下に出す小さなパネル） */
@@ -2244,6 +2277,25 @@ body.mtm-fs-open {
     color: #fff;
     font-size: 11px;
     font-weight: 600;
+    line-height: 18px;
+}
+
+/* 番号とコマの印を左上に並べる */
+.ps-book-marks {
+    position: absolute;
+    left: 5px;
+    top: 5px;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.ps-book-marks .ps-book-no {
+    position: static;
+}
+
+.ps-book-marks .ps-thumb-panel {
+    height: 18px;
     line-height: 18px;
 }
 

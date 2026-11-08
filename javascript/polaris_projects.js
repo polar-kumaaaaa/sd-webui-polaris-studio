@@ -1086,7 +1086,23 @@
         window.PolarisStudio.reloadEditor();
     }
 
-    function makeThumb(p, cut, image, {on, selected, mark, label, onclick, select, books}) {
+    // コマで使っている印。panels はコマページの名前（「Book」のコマページ 003 など）
+    function panelMark(panels) {
+        const ns = "http://www.w3.org/2000/svg";
+        const svg = document.createElementNS(ns, "svg");
+        svg.setAttribute("viewBox", "0 0 12 12");
+        svg.setAttribute("aria-hidden", "true");
+        // コマ割りの形：外枠と、横に 1 本・下の段を縦に 1 本
+        const path = document.createElementNS(ns, "path");
+        path.setAttribute("d", "M1.5 1.5h9v9h-9z M1.5 5.5h9 M6 5.5v5");
+        svg.appendChild(path);
+        return el("span", {class: "ps-thumb-panel", title: "コマで使用中: " + panels.join("、")}, [
+            svg,
+            ...(panels.length > 1 ? [document.createTextNode(String(panels.length))] : []),
+        ]);
+    }
+
+    function makeThumb(p, cut, image, {on, selected, mark, label, onclick, select, books, panels}) {
         const thumb = el("button", {type: "button", class: "ps-thumb" + (on ? " ps-on" : "") + (selected ? " ps-selected" : ""), title: image.name}, [
             el("img", {src: imageUrl(p, cut, image, true), alt: "", loading: "lazy"}),
             ...(mark ? [el("span", {class: "ps-thumb-mark", text: mark})] : []),
@@ -1095,8 +1111,11 @@
                 select(e);
             }})] : []),
             ...(label ? [el("span", {class: "ps-thumb-label", text: label})] : []),
-            // 登録されている Book（削除するときは確認で知らせる）
-            ...(books && books.length ? [el("span", {class: "ps-thumb-book", title: "Book: " + books.map((b) => b.title).join("、"), text: "📖" + (books.length > 1 ? books.length : "")})] : []),
+            // 登録されている Book と、はめ込んでいるコマ（削除するときは確認で知らせる）
+            ...((books && books.length) || (panels && panels.length) ? [el("span", {class: "ps-thumb-marks"}, [
+                ...(books && books.length ? [el("span", {class: "ps-thumb-book", title: "Book: " + books.map((b) => b.title).join("、"), text: "📖" + (books.length > 1 ? books.length : "")})] : []),
+                ...(panels && panels.length ? [panelMark(panels)] : []),
+            ])] : []),
         ]);
         thumb.dataset.name = image.name;
         thumb.addEventListener("click", onclick);
@@ -1497,6 +1516,21 @@
     const bookKeys = (book) => new Set([...imageItems(book), ...panelRefs(book)].map(refKey));
     // その画像（selKey の形）を使っている Book
     const booksWith = (key) => project.books.filter((b) => bookKeys(b).has(key));
+    // その画像を、画像として登録している Book
+    const booksListing = (key) => project.books.filter((b) => imageItems(b).some((r) => refKey(r) === key));
+    // その画像をはめ込んでいるコマページの名前。同じページに何コマあっても 1 つと数える
+    function panelPages(key, books, withTitle) {
+        const names = [];
+        for (const b of books) {
+            const width = Math.max(3, String(b.items.length).length);
+            b.items.forEach((r, i) => {
+                if (!isPage(r) || !r.shapes.some((s) => s.image && refKey(s.image) === key)) return;
+                const no = String(i + 1).padStart(width, "0");
+                names.push(withTitle ? `「${b.title}」の ${no}` : `${no} ページ`);
+            });
+        }
+        return names;
+    }
     const bookCount = (book) => {
         const pages = pageItems(book).length;
         return `${book.items.length - pages} 枚` + (pages ? `・コマページ ${pages}` : "");
@@ -1697,9 +1731,10 @@
                 const found = findImage(r);
                 const cut = found && found.cut;
                 const image = found && found.image;
+                const panels = panelPages(refKey(r), [book], false);
                 page = el("div", {class: "ps-book-page" + (image ? "" : " ps-missing"), draggable: "true", title: `${cut ? cut.title : "（削除済み）"}\n${r.name}`}, [
                     image ? el("img", {src: imageUrl(project, cut, image, true), alt: "", draggable: "false"}) : el("span", {class: "ps-book-missing", text: "画像が見つかりません"}),
-                    no,
+                    el("span", {class: "ps-book-marks"}, [no, ...(panels.length ? [panelMark(panels)] : [])]),
                     el("span", {class: "ps-book-cut", text: cut ? cut.title : ""}),
                     el("button", {type: "button", class: "mtm-icon ps-book-remove", title: "Book から登録解除（画像は削除しません）", text: "✕", onclick: () => unregisterPage(book, i)}),
                 ]);
@@ -2238,7 +2273,8 @@
             thumbs.appendChild(makeThumb(project, cut, image, {
                 selected: selectedImages.has(selKey(cut, image.name)),
                 mark: image === key ? "キー" : "",
-                books: booksWith(selKey(cut, image.name)),
+                books: booksListing(selKey(cut, image.name)),
+                panels: panelPages(selKey(cut, image.name), project.books, true),
                 onclick: (e) => (e.shiftKey ? selectRange(image.name) : openViewer(image)),
                 select(e) {
                     if (e.shiftKey) return selectRange(image.name);
