@@ -239,25 +239,13 @@ def _sanitize_project(raw):
     }
 
 
-# Book は「画像への参照（カット案の id と画像の名前）」と「コマページ」を並び順に持つ。画像そのものは持たない。
-# 同じ画像は 1 つの Book に 1 回だけ。カット案がなくなった画像は外す。
-# 古いデータの images（画像だけの並び）は items として読む
+# Book は「コマページ」を並び順に持つ。コマにはめ込む画像は、コマページの四角が参照（カット案の id と画像の名前）で持つ。
+# 以前の「Book に追加」で登録した画像の参照や、古いデータの images（画像だけの並び）は読まずに捨てる
 def _sanitize_book(raw, cut_ids):
-    items = []
-    seen = set()
-    source = raw.get("items") if isinstance(raw.get("items"), list) else raw.get("images")
-    for x in _dicts(source):
-        if x.get("type") == "page":
-            items.append(_sanitize_page(x, cut_ids))
-            continue
-        ref = _image_ref(x, cut_ids)
-        if ref and (ref["cutId"], ref["name"]) not in seen:
-            seen.add((ref["cutId"], ref["name"]))
-            items.append(ref)
     return {
         "id": _safe_id(raw.get("id")),
         "title": str(raw.get("title", "")).strip() or "無題の Book",
-        "items": items,
+        "items": [_sanitize_page(x, cut_ids) for x in _dicts(raw.get("items")) if x.get("type") == "page"],
         "createdAt": str(raw.get("createdAt", "")),
     }
 
@@ -572,23 +560,7 @@ def unique_name(folder, name):
 
 
 # ---------- Book の書き出し ----------
-# 生成情報などのメタ情報をすべて落とした PNG にし、Book 内の順序（001.png ...）をファイル名にして ZIP にまとめる
-
-PNG_MODES = ("1", "L", "LA", "I", "I;16", "P", "RGB", "RGBA")
-
-
-def clean_png(path):
-    with Image.open(path) as image:
-        image.load()
-        clean = image.copy()
-    # 画素だけを残す。透過は画像の一部なので残し、ほかの情報（生成情報・EXIF・ICC など）は書き出さない
-    transparency = clean.info.get("transparency")
-    clean.info = {"transparency": transparency} if transparency is not None else {}
-    if clean.mode not in PNG_MODES:
-        clean = clean.convert("RGBA" if "A" in clean.mode else "RGB")
-    out = io.BytesIO()
-    clean.save(out, "PNG")
-    return out.getvalue()
+# コマページを、生成情報などのメタ情報を持たない PNG に描き、Book 内の順序（001.png ...）をファイル名にして ZIP にまとめる
 
 
 # はめ込む範囲。四角と縦横比が違うときは、範囲の中央を四角の縦横比で切り出す（画面の表示と同じ）
@@ -655,28 +627,19 @@ def render_page(project, page):
     return out.getvalue()
 
 
-# items は Book の並び（画像の参照とコマページ）。見つからない画像は飛ばす。コマページは 1 枚の画像にする
+# items は Book の並び（コマページ）。コマページは 1 枚の画像にする。コマページ以外は飛ばす
 def book_zip(project, items):
-    pages = []
-    for item in _dicts(items):
-        if item.get("type") == "page":
-            page = _sanitize_page(item, None)
-            pages.append(lambda page=page: render_page(project, page))
-            continue
-        ref = _image_ref(item, None)
-        path = ref and image_path(project, ref["cutId"], ref["name"])
-        if path and os.path.isfile(path):
-            pages.append(lambda path=path: clean_png(path))
+    pages = [_sanitize_page(item, None) for item in _dicts(items) if item.get("type") == "page"]
     if not pages:
-        raise ValueError("書き出す画像がありません")
+        raise ValueError("書き出すコマページがありません")
     width = max(3, len(str(len(pages))))
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
-        for i, make in enumerate(pages, 1):
+        for i, page in enumerate(pages, 1):
             # 日時も手がかりにならないよう固定にする
             info = zipfile.ZipInfo(f"{i:0{width}d}.png", date_time=(1980, 1, 1, 0, 0, 0))
             info.compress_type = zipfile.ZIP_DEFLATED
-            z.writestr(info, make())
+            z.writestr(info, render_page(project, page))
     return buf.getvalue()
 
 
@@ -825,7 +788,7 @@ def on_app_started(demo, app):
     @app.post("/polaris-studio/books/export")
     def export_book(payload: dict = Body(...)):
         try:
-            data = book_zip(payload.get("project"), payload.get("items") or payload.get("images") or [])
+            data = book_zip(payload.get("project"), payload.get("items") or [])
         except Exception as e:
             return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
         return Response(data, media_type="application/zip")

@@ -150,7 +150,7 @@
                             <button type="button" class="mtm-btn mtm-primary ps-book-export" title="メタ情報を落とした PNG を、Book 内の順序をファイル名にして ZIP で保存します">ZIP で書き出し</button>
                             <button type="button" class="mtm-btn mtm-danger ps-book-delete" title="Book だけを削除します。画像は削除しません">Book を削除</button>
                         </div>
-                        <div class="ps-book-hint">クリックでビューワー（コマページは編集画面）、ドラッグで並べ替えます。✕ は Book からの登録解除で、画像は削除しません。画像はサムネイル一覧で選んで「Book に追加」から登録します。</div>
+                        <div class="ps-book-hint">クリックでコマページの編集画面を開き、ドラッグで並べ替えます。コマを選んで「画像を選ぶ」から、カット案 → そのカット案の画像の順にはめ込む画像を選びます。✕ はコマページの削除で、画像は削除しません。</div>
                         <div class="ps-book-pages"></div>
                     </div>
                 </div>
@@ -211,7 +211,6 @@
                     <span class="mtm-fs-spacer"></span>
                     <span class="ps-gallery-selinfo" title="選択はカット案をまたいで残ります"></span>
                     <button type="button" class="mtm-btn ps-gallery-clear">選択を解除</button>
-                    <button type="button" class="mtm-btn ps-gallery-book" title="選んだ画像を Book に登録します（画像はコピーしません）">Book に追加</button>
                     <button type="button" class="mtm-btn ps-gallery-regen" title="選んだ画像を、元のプロンプトと Seed のまま Steps だけ変えて作り直すキューを登録します">再生成</button>
                     <button type="button" class="mtm-btn mtm-danger ps-gallery-delete">選択を削除</button>
                 </div>
@@ -234,18 +233,6 @@
                 <div class="ps-qp-foot">
                     <span class="ps-queue-head"></span>
                     <button type="button" class="mtm-btn mtm-primary ps-queue-save">登録</button>
-                </div>
-            </div>
-            <div class="ps-book-panel ps-off">
-                <div class="ps-qp-head">
-                    <span class="ps-qp-title">Book に追加</span>
-                    <span class="ps-qp-cut ps-book-panel-info"></span>
-                    <button type="button" class="mtm-icon ps-book-panel-back" title="閉じる (Esc)">✕</button>
-                </div>
-                <div class="ps-book-choices"></div>
-                <div class="ps-qp-foot">
-                    <span class="ps-queue-head ps-book-panel-head"></span>
-                    <button type="button" class="mtm-btn mtm-primary ps-book-panel-save">追加</button>
                 </div>
             </div>
             <div class="ps-regen-panel ps-off">
@@ -375,12 +362,6 @@
             renderGallery();
         });
         q(".ps-gallery-regen").addEventListener("click", (e) => openRegenForm(e.currentTarget));
-        q(".ps-gallery-book").addEventListener("click", (e) => openBookPanel(e.currentTarget));
-        q(".ps-book-panel-back").addEventListener("click", closeBookPanel);
-        q(".ps-book-panel-save").addEventListener("click", addToBook);
-        q(".ps-book-panel").addEventListener("keydown", (e) => {
-            if (e.key === "Enter" && !e.isComposing && e.target.tagName === "INPUT") addToBook();
-        });
         q(".ps-open-books").addEventListener("click", () => openBooks());
         q(".ps-books-back").addEventListener("click", closeBooks);
         q(".ps-books-new").addEventListener("click", createBook);
@@ -413,10 +394,7 @@
         q(".ps-view-key").addEventListener("click", () => setKeyImage(viewCut, viewImage.name));
         q(".ps-view-restore").addEventListener("click", restorePromptFromImage);
         q(".ps-view-i2i").addEventListener("click", sendToImg2img);
-        q(".ps-view-delete").addEventListener("click", () => {
-            // Book から開いたビューワーでは削除しない（ボタンも出さない）
-            if (!viewBook) askDeleteImages([selKey(viewCut, viewImage.name)], "画像を削除");
-        });
+        q(".ps-view-delete").addEventListener("click", () => askDeleteImages([selKey(viewCut, viewImage.name)], "画像を削除"));
         q(".ps-view-info").addEventListener("click", () => {
             setViewerInfo(q(".ps-viewer-info").classList.contains("ps-off"));
             try {
@@ -446,13 +424,11 @@
             hideCutBar();
             placeQueuePanel();
             placeRegenPanel();
-            placeBookPanel();
         }, {passive: true});
         window.addEventListener("resize", () => {
             placeQueuePanel();
             placeQueueManager();
             placeRegenPanel();
-            placeBookPanel();
         });
         // キュー登録とキュー管理のパネルは、パネルの外を押すと閉じる。
         // 別のカット案の「キュー」や「キュー管理」のボタン自体は、それぞれの動作（移る・開け閉め）に任せる。トーストの操作では閉じない
@@ -462,7 +438,6 @@
             if (isOpen(".ps-queue-panel") && !q(".ps-queue-panel").contains(t) && !t.closest(".ps-cut-bar-queue, .mtm-fs-queue")) closeQueueForm();
             if (isOpen(".ps-queues-view") && !q(".ps-queues-view").contains(t) && !t.closest(".ps-open-queues, .mtm-fs-queues")) closeQueueManager();
             if (isOpen(".ps-regen-panel") && !q(".ps-regen-panel").contains(t) && !t.closest(".ps-gallery-regen")) closeRegenForm();
-            if (isOpen(".ps-book-panel") && !q(".ps-book-panel").contains(t) && !t.closest(".ps-gallery-book")) closeBookPanel();
         }, true);
         fs.addEventListener("keydown", onKeydown, true);
     }
@@ -489,7 +464,7 @@
         // Esc は手前の部品から順に閉じる。プロンプト編集が開いていて部品がなければ編集側に任せる
         // 全画面の窓で開いた一覧は手前の部品として、インラインの一覧はダイアログなどの後に閉じる
         const windowGallery = isOpen(".ps-gallery-view") && q(".ps-gallery-view").classList.contains("mtm-fs-window");
-        const front = [".ps-delete-dialog", ".ps-viewer", ...(windowGallery ? [".ps-gallery-view"] : []), ".ps-queues-view", ".ps-new-dialog", ".ps-cover-dialog", ".ps-key-dialog", ".ps-queue-panel", ".ps-regen-panel", ".ps-book-panel"].find(isOpen);
+        const front = [".ps-delete-dialog", ".ps-viewer", ...(windowGallery ? [".ps-gallery-view"] : []), ".ps-queues-view", ".ps-new-dialog", ".ps-cover-dialog", ".ps-key-dialog", ".ps-queue-panel", ".ps-regen-panel"].find(isOpen);
         if (!front && root.classList.contains("ps-off")) return;
         e.preventDefault();
         e.stopPropagation();
@@ -497,7 +472,6 @@
         else if (front === ".ps-gallery-view") closeGallery();
         else if (front === ".ps-queue-panel") closeQueueForm();
         else if (front === ".ps-regen-panel") closeRegenForm();
-        else if (front === ".ps-book-panel") closeBookPanel();
         else if (front === ".ps-queues-view") closeQueueManager();
         else if (front) hide(front);
         else if (isOpen(".ps-books-view")) closeBooks();
@@ -567,7 +541,6 @@
         closeQueueForm();
         closeQueueManager();
         closeRegenForm();
-        closeBookPanel();
         q(".ps-gallery-view").classList.add("ps-off");
         galleryCut = null;
         project = null;
@@ -580,10 +553,11 @@
 
     function showProject(p) {
         project = p;
-        // Book のない古いデータにも Book を持たせる。画像だけを並べていた古い Book（images）は items にする
+        // Book のない古いデータにも Book を持たせる。Book に持つのはコマページだけで、
+        // 以前の「Book に追加」で登録した画像（{cutId, name}）や古い images は外す
         if (!Array.isArray(p.books)) p.books = [];
         for (const b of p.books) {
-            if (!Array.isArray(b.items)) b.items = Array.isArray(b.images) ? b.images : [];
+            b.items = Array.isArray(b.items) ? b.items.filter(isPage) : [];
             delete b.images;
         }
         q(".ps-project-title").value = p.title;
@@ -1137,7 +1111,7 @@
         ]);
     }
 
-    function makeThumb(p, cut, image, {on, selected, mark, label, onclick, select, books, panels}) {
+    function makeThumb(p, cut, image, {on, selected, mark, label, onclick, select, panels}) {
         const thumb = el("button", {type: "button", class: "ps-thumb" + (on ? " ps-on" : "") + (selected ? " ps-selected" : ""), title: image.name}, [
             el("img", {src: imageUrl(p, cut, image, true), alt: "", loading: "lazy"}),
             ...(mark ? [el("span", {class: "ps-thumb-mark", text: mark})] : []),
@@ -1146,11 +1120,8 @@
                 select(e);
             }})] : []),
             ...(label ? [el("span", {class: "ps-thumb-label", text: label})] : []),
-            // 登録されている Book と、はめ込んでいるコマ（削除するときは確認で知らせる）
-            ...((books && books.length) || (panels && panels.length) ? [el("span", {class: "ps-thumb-marks"}, [
-                ...(books && books.length ? [el("span", {class: "ps-thumb-book", title: "Book: " + books.map((b) => b.title).join("、"), text: "📖" + (books.length > 1 ? books.length : "")})] : []),
-                ...(panels && panels.length ? [panelMark(panels)] : []),
-            ])] : []),
+            // はめ込んでいるコマ（削除するときは確認で知らせる）
+            ...(panels && panels.length ? [el("span", {class: "ps-thumb-marks"}, [panelMark(panels)])] : []),
         ]);
         thumb.dataset.name = image.name;
         thumb.addEventListener("click", onclick);
@@ -1536,27 +1507,22 @@
     }
 
     // ---------- Book（製本） ----------
-    // Book は画像への参照（{cutId, name}）とコマページ（{type: "page", ...}、polaris_pages.js）を Book 内の順序で items に持つ。
-    // 画像は複数の Book に入れられる。Book の画面からは登録解除だけができ、画像の削除はできない。Book を削除しても画像は残る。
-    // コマページの四角にはめ込んだ画像は、Book から登録解除してもコマに残る
+    // Book はコマページ（{type: "page", ...}、polaris_pages.js）を Book 内の順序で items に持つ。
+    // コマにはめ込む画像は、コマページの編集画面でカット案 → そのカット案の画像の順に選ぶ。
+    // Book を削除しても画像は残る
 
     let bookId = "";            // Book の画面で開いている Book
-    let bookTarget = "";        // 「Book に追加」で前回選んだ Book（"" は新しい Book）
-    let bookButton = null;
 
     const bookOf = (id) => project.books.find((b) => b.id === id) || null;
     const refKey = (r) => r.cutId + "/" + r.name;
     const isPage = (r) => r.type === "page";
-    const imageItems = (book) => book.items.filter((r) => !isPage(r));
     const pageItems = (book) => book.items.filter(isPage);
     // コマにはめ込んだ画像の参照
     const panelRefs = (book) => pageItems(book).flatMap((p) => p.shapes.filter((s) => s.image).map((s) => s.image));
-    // Book が使っている画像（登録した画像とコマの画像）の selKey
-    const bookKeys = (book) => new Set([...imageItems(book), ...panelRefs(book)].map(refKey));
+    // Book のコマが使っている画像の selKey
+    const bookKeys = (book) => new Set(panelRefs(book).map(refKey));
     // その画像（selKey の形）を使っている Book
     const booksWith = (key) => project.books.filter((b) => bookKeys(b).has(key));
-    // その画像を、画像として登録している Book
-    const booksListing = (key) => project.books.filter((b) => imageItems(b).some((r) => refKey(r) === key));
     // その画像をはめ込んでいるコマページの名前。同じページに何コマあっても 1 つと数える
     function panelPages(key, books, withTitle) {
         const names = [];
@@ -1570,10 +1536,7 @@
         }
         return names;
     }
-    const bookCount = (book) => {
-        const pages = pageItems(book).length;
-        return `${book.items.length - pages} 枚` + (pages ? `・コマページ ${pages}` : "");
-    };
+    const bookCount = (book) => `コマページ ${pageItems(book).length}`;
 
     function findImage(ref) {
         const cut = cutsOf(project).find((c) => c.id === ref.cutId);
@@ -1589,114 +1552,16 @@
         }).filter((x) => x.n);
         if (!hit.length) return "";
         const n = new Set(keys.filter((k) => booksWith(k).length)).size;
-        return `\n⚠ このうち ${n} 枚は Book（${hit.map((x) => `「${x.b.title}」${x.n} 枚`).join("、")}）で使われています。削除すると Book から外れ、はめ込んだコマは空になります。`;
+        return `\n⚠ このうち ${n} 枚は Book（${hit.map((x) => `「${x.b.title}」${x.n} 枚`).join("、")}）のコマで使われています。削除すると、はめ込んだコマは空になります。`;
     }
 
-    // 消えた画像やカット案を Book から外し、コマのはめ込みも外す
+    // 消えた画像やカット案を、コマのはめ込みから外す
     function removeFromBooks(match) {
         for (const b of project.books) {
-            b.items = b.items.filter((r) => isPage(r) || !match(r));
             for (const p of pageItems(b)) {
                 for (const s of p.shapes) if (s.image && match(s.image)) s.image = null;
             }
         }
-    }
-
-    function openBookPanel(button) {
-        const keys = orderedSelection();
-        if (!keys.length) return;
-        bookButton = button;
-        q(".ps-book-panel-info").textContent = `${keys.length} 枚`;
-        if (bookTarget && !bookOf(bookTarget)) bookTarget = "";
-        if (!bookTarget && project.books.length) bookTarget = project.books[project.books.length - 1].id;
-        renderBookChoices();
-        const head = q(".ps-book-panel-head");
-        head.textContent = "";
-        head.classList.remove("ps-qp-added");
-        const panel = q(".ps-book-panel");
-        panel.classList.remove("ps-off", "ps-qp-in");
-        void panel.offsetWidth;
-        panel.classList.add("ps-qp-in");
-        placeBookPanel();
-        if (bookTarget) q(".ps-book-panel-save").focus();
-        else q(".ps-book-new-title").focus();
-    }
-
-    // 追加先の Book を 1 つ選ぶ。最後の行は新しい Book（タイトルを入れて作る）
-    function renderBookChoices() {
-        const box = q(".ps-book-choices");
-        box.textContent = "";
-        const choice = (id, children) => {
-            const radio = el("input", {type: "radio", name: "ps-book-target"});
-            radio.checked = bookTarget === id;
-            radio.addEventListener("change", () => {
-                bookTarget = id;
-                if (!id) q(".ps-book-new-title").focus();
-            });
-            return el("label", {class: "ps-book-choice"}, [radio, ...children]);
-        };
-        for (const b of project.books) {
-            box.appendChild(choice(b.id, [
-                el("span", {class: "ps-book-choice-title", text: b.title}),
-                el("span", {class: "ps-book-choice-count", text: bookCount(b)}),
-            ]));
-        }
-        const title = el("input", {type: "text", class: "ps-book-new-title", placeholder: "新しい Book のタイトル"});
-        title.value = "";
-        title.addEventListener("focus", () => {
-            bookTarget = "";
-            box.querySelectorAll("input[type=radio]").forEach((r, i, all) => (r.checked = i === all.length - 1));
-        });
-        box.appendChild(choice("", [title]));
-    }
-
-    function closeBookPanel() {
-        if (!isOpen(".ps-book-panel")) return;
-        bookButton = null;
-        hide(".ps-book-panel");
-    }
-
-    function placeBookPanel() {
-        if (!isOpen(".ps-book-panel") || !bookButton || !bookButton.isConnected) return;
-        const panel = q(".ps-book-panel");
-        const r = bookButton.getBoundingClientRect();
-        let top = r.bottom + 6;
-        if (top + panel.offsetHeight > window.innerHeight - 8) top = Math.max(8, r.top - panel.offsetHeight - 6);
-        panel.style.top = top + "px";
-        panel.style.left = Math.min(Math.max(8, r.right - panel.offsetWidth), window.innerWidth - panel.offsetWidth - 8) + "px";
-    }
-
-    // 選択を、カット案の並び、その中は画像の並び（古い順）にそろえる。もうない画像は除く
-    function orderedSelection() {
-        const keys = [];
-        for (const cut of cutsOf(project)) {
-            for (const image of imagesOf(project, cut)) {
-                if (selectedImages.has(selKey(cut, image.name))) keys.push(selKey(cut, image.name));
-            }
-        }
-        return keys;
-    }
-
-    async function addToBook() {
-        const keys = orderedSelection();
-        if (!keys.length) return;
-        let book = bookOf(bookTarget);
-        if (!book) {
-            const title = q(".ps-book-new-title").value.trim() || `Book ${project.books.length + 1}`;
-            book = {id: newId(), title, items: [], createdAt: new Date().toISOString()};
-            project.books.push(book);
-            bookTarget = book.id;
-        }
-        // 後ろに足す。すでに入っている画像は足さない（順序はそのまま）
-        const had = new Set(imageItems(book).map(refKey));
-        const added = keys.filter((k) => !had.has(k));
-        book.items.push(...added.map((k) => ({cutId: selCutId(k), name: selName(k)})));
-        renderBookChoices();
-        const head = q(".ps-book-panel-head");
-        head.textContent = `「${book.title}」に ${added.length} 枚追加しました` + (added.length < keys.length ? `（${keys.length - added.length} 枚は登録済み）` : "");
-        head.classList.add("ps-qp-added");
-        if (isOpen(".ps-gallery-view")) renderGallery();
-        await saveProjects();
     }
 
     // Book の画面。個別プロジェクトの画面と入れ替えて開く
@@ -1704,7 +1569,6 @@
         closeQueueForm();
         closeQueueManager();
         closeRegenForm();
-        closeBookPanel();
         if (isOpen(".ps-gallery-view")) closeGallery();
         bookId = bookOf(id) ? id : bookOf(bookId) ? bookId : (project.books[0] || {}).id || "";
         q(".ps-project-view").classList.add("ps-off");
@@ -1748,41 +1612,22 @@
     function renderBookPages(book) {
         const box = q(".ps-book-pages");
         box.textContent = "";
-        if (!book.items.length) box.appendChild(el("div", {class: "mtm-empty", text: "まだ画像がありません。サムネイル一覧で画像を選んで「Book に追加」から登録します。「コマページ作成」で白紙のコマページを足せます。"}));
+        if (!book.items.length) box.appendChild(el("div", {class: "mtm-empty", text: "まだコマページがありません。「コマページ作成」で白紙のコマページを足し、コマにカット案の画像をはめ込みます。"}));
         const width = Math.max(3, String(book.items.length).length);
         book.items.forEach((r, i) => {
             const no = el("span", {class: "ps-book-no", text: String(i + 1).padStart(width, "0")});
-            let page;
-            if (isPage(r)) {
-                page = el("div", {class: "ps-book-page ps-book-komapage", draggable: "true", title: `コマページ ${r.width} × ${r.height}\nクリックで編集`}, [
-                    window.PolarisPages.thumb(r, (ref) => {
-                        const found = findImage(ref);
-                        return found ? imageUrl(project, found.cut, found.image, true) : null;
-                    }),
-                    no,
-                    el("span", {class: "ps-book-cut", text: "コマページ"}),
-                    el("button", {type: "button", class: "mtm-icon ps-book-remove", title: "コマページを削除（画像は削除しません）", text: "✕", onclick: () => deletePage(book, r)}),
-                ]);
-                page.addEventListener("click", (e) => {
-                    if (!e.target.closest("button")) openPageEditor(book, r);
-                });
-            } else {
-                const found = findImage(r);
-                const cut = found && found.cut;
-                const image = found && found.image;
-                const panels = panelPages(refKey(r), [book], false);
-                page = el("div", {class: "ps-book-page" + (image ? "" : " ps-missing"), draggable: "true", title: `${cut ? cut.title : "（削除済み）"}\n${r.name}`}, [
-                    image ? el("img", {src: imageUrl(project, cut, image, true), alt: "", draggable: "false"}) : el("span", {class: "ps-book-missing", text: "画像が見つかりません"}),
-                    el("span", {class: "ps-book-marks"}, [no, ...(panels.length ? [panelMark(panels)] : [])]),
-                    el("span", {class: "ps-book-cut", text: cut ? cut.title : ""}),
-                    el("button", {type: "button", class: "mtm-icon ps-book-remove", title: "Book から登録解除（画像は削除しません）", text: "✕", onclick: () => unregisterPage(book, i)}),
-                ]);
-                // クリックでビューワーを開く。Book の順序で前後に移動し、削除はできない
-                page.addEventListener("click", (e) => {
-                    if (!image || e.target.closest("button")) return;
-                    openViewer(image, cut, book);
-                });
-            }
+            const page = el("div", {class: "ps-book-page ps-book-komapage", draggable: "true", title: `コマページ ${r.width} × ${r.height}\nクリックで編集`}, [
+                window.PolarisPages.thumb(r, (ref) => {
+                    const found = findImage(ref);
+                    return found ? imageUrl(project, found.cut, found.image, true) : null;
+                }),
+                no,
+                el("span", {class: "ps-book-cut", text: "コマページ"}),
+                el("button", {type: "button", class: "mtm-icon ps-book-remove", title: "コマページを削除（画像は削除しません）", text: "✕", onclick: () => deletePage(book, r)}),
+            ]);
+            page.addEventListener("click", (e) => {
+                if (!e.target.closest("button")) openPageEditor(book, r);
+            });
             page.addEventListener("dragstart", (e) => {
                 bookDrag = i;
                 e.dataTransfer.effectAllowed = "move";
@@ -1820,12 +1665,6 @@
         await saveProjects();
     }
 
-    async function unregisterPage(book, index) {
-        book.items.splice(index, 1);
-        renderBooks();
-        await saveProjects();
-    }
-
     // ---------- コマページ（polaris_pages.js） ----------
 
     // 白紙のコマページを Book の最後に足して、すぐ編集画面を開く
@@ -1852,12 +1691,20 @@
             host: overlay,
             page,
             title: () => `${book.title}  ${book.items.indexOf(page) + 1} / ${book.items.length}`,
-            // はめ込む画像は、この Book に登録した画像から選ぶ
-            images: () => imageItems(book).map((r) => {
-                const found = findImage(r);
-                return found && {cutId: r.cutId, name: r.name, thumb: imageUrl(project, found.cut, found.image, true), label: found.cut.title,
-                    panels: panelPages(refKey(r), [book], false)};
-            }).filter(Boolean),
+            // はめ込む画像は、カット案を選んでから、そのカット案の画像（古い順）から選ぶ。
+            // panels はこの Book のコマで使っているページの名前（カット案ではその画像のどれかを使っているページ）
+            cuts: () => project.scenes.flatMap((scene) => scene.cuts.map((cut) => {
+                const key = keyImageOf(project, cut);
+                const list = imagesOf(project, cut);
+                const pages = [...new Set(list.flatMap((image) => panelPages(selKey(cut, image.name), [book], false)))].sort();
+                return {id: cut.id, title: cut.title, scene: scene.name, count: list.length,
+                    thumb: key ? imageUrl(project, cut, key, true) : "", panels: pages};
+            })),
+            images: (cutId) => {
+                const cut = cutsOf(project).find((c) => c.id === cutId);
+                return cut ? imagesOf(project, cut).map((image, i) => ({cutId, name: image.name, label: String(i + 1),
+                    thumb: imageUrl(project, cut, image, true), panels: panelPages(selKey(cut, image.name), [book], false)})) : [];
+            },
             // コマで使っている印（サムネイル一覧と同じもの）
             panelMark,
             resolve: (ref, thumb) => {
@@ -1895,7 +1742,7 @@
         if (!book) return;
         const pages = pageItems(book).length;
         const pageNote = pages ? `\nコマページ ${pages} 枚は Book と一緒に消えます。` : "";
-        if (!confirm(`Book「${book.title}」を削除しますか？\n登録した ${book.items.length - pages} 枚の画像は削除されません。${pageNote}`)) return;
+        if (!confirm(`Book「${book.title}」を削除しますか？\nコマにはめ込んだ画像は削除されません。${pageNote}`)) return;
         project.books.splice(project.books.indexOf(book), 1);
         bookId = (project.books[0] || {}).id || "";
         renderBooks();
@@ -2229,7 +2076,6 @@
 
     function closeGallery() {
         closeRegenForm();
-        closeBookPanel();
         hide(".ps-gallery-view");
         galleryCut = null;
         refreshViews();
@@ -2319,7 +2165,6 @@
             thumbs.appendChild(makeThumb(project, cut, image, {
                 selected: selectedImages.has(selKey(cut, image.name)),
                 mark: image === key ? "キー" : "",
-                books: booksListing(selKey(cut, image.name)),
                 panels: panelPages(selKey(cut, image.name), project.books, true),
                 onclick: (e) => (e.shiftKey ? selectRange(image.name) : openViewer(image)),
                 select(e) {
@@ -2348,9 +2193,6 @@
         const regen = q(".ps-gallery-regen");
         regen.textContent = `再生成（${total}枚）`;
         regen.disabled = total === 0;
-        const book = q(".ps-gallery-book");
-        book.textContent = `Book に追加（${total}枚）`;
-        book.disabled = total === 0;
         const del = q(".ps-gallery-delete");
         del.textContent = `選択を削除（${total}枚）`;
         del.disabled = total === 0;
@@ -2512,11 +2354,10 @@
 
     // ---------- 単体ビューワー ----------
 
-    // 前後に移動する画像の並び（{cut, image}）。絞り込み中は絞り込み結果、Book から開いたときは Book の順序
+    // 前後に移動する画像の並び（{cut, image}）。絞り込み中は絞り込み結果
     let viewList = [];
     let viewImage = null;
-    let viewCut = null;     // 表示中の画像のカット案。Book ではカット案をまたいで移動する
-    let viewBook = null;    // Book の画面から開いたときの Book（このときは削除できない）
+    let viewCut = null;     // 表示中の画像のカット案
     let viewIndex = 0;
     let zoom = 1;
     let fitting = true;
@@ -2532,19 +2373,12 @@
         applyZoom();
     }
 
-    function viewEntries() {
-        if (!viewBook) return visibleImages().map((image) => ({cut: galleryCut, image}));
-        // Book の画像のうち、見つからないものとコマページは飛ばす
-        return imageItems(viewBook).map(findImage).filter(Boolean);
-    }
+    const viewEntries = () => visibleImages().map((image) => ({cut: galleryCut, image}));
 
     const isEntry = (x, cut, image) => x.cut.id === cut.id && x.image.name === image.name;
 
-    // book を渡すと Book の順序で前後に移動し、削除ボタンを出さない
-    function openViewer(image, cut = galleryCut, book = null) {
-        viewBook = book;
+    function openViewer(image, cut = galleryCut) {
         viewList = viewEntries();
-        q(".ps-view-delete").classList.toggle("ps-off", !!book);
         let info = false;
         try {
             info = localStorage.getItem(VIEWER_INFO_KEY) === "1";
@@ -2576,9 +2410,7 @@
         const key = keyImageOf(project, cut);
         const isKey = !!key && key.name === image.name;
         const number = imagesOf(project, cut).findIndex((x) => x.name === image.name) + 1;
-        const where = viewBook
-            ? `${viewBook.title}  ${viewIndex + 1} / ${viewList.length}  ・ ${cut.title}`
-            : `${cut.title}  ${number} / ${imagesOf(project, cut).length}`;
+        const where = `${cut.title}  ${number} / ${imagesOf(project, cut).length}`;
         q(".ps-viewer-name").textContent = where + (isKey ? "  （キー画像）" : "");
         q(".ps-nav-prev").disabled = viewIndex <= 0;
         q(".ps-nav-next").disabled = viewIndex >= viewList.length - 1;

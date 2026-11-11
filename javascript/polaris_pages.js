@@ -203,6 +203,7 @@
             <div class="ps-pg-crop ps-off">
                 <div class="ps-pg-crop-box">
                     <div class="ps-pg-crop-head">
+                        <button type="button" class="mtm-btn ps-pg-pick-back ps-off" title="カット案の一覧に戻る (Esc)">← カット案</button>
                         <span class="ps-pg-crop-title"></span>
                         <span class="ps-pg-crop-info"></span>
                         <span class="mtm-fs-spacer"></span>
@@ -736,7 +737,9 @@
         };
         if (e.key === "Escape") {
             stop();
-            if (isCropOpen()) closeCrop();
+            // 画像の一覧ではカット案の一覧に戻る
+            if (isCropOpen() && !crop.image && crop.pickCut) showPicker();
+            else if (isCropOpen()) closeCrop();
             else if (drag) cancelDrag();
             else if (typing) e.target.blur();
             else if (ed.sel) select(null);
@@ -786,16 +789,20 @@
     }
 
     // ---------- 画像の選択とクロップ ----------
-    // 1. Book の画像から 1 枚選ぶ  2. 画像の上に四角と同じ縦横比の枠を出して、はめ込む範囲を決める
+    // 1. カット案を選ぶ  2. そのカット案の画像から 1 枚選ぶ  3. 画像の上に四角と同じ縦横比の枠を出して、はめ込む範囲を決める
 
     // mode: "cover"（拡大して合わせる。枠は画像の中で自由な大きさ）か "full"（原寸。枠は四角と同じ大きさで、画像からはみ出してよい）
-    const crop = {rect: null, image: null, mode: "cover", iw: 0, ih: 0, x: 0, y: 0, w: 0, h: 0, scale: 1, ox: 0, oy: 0, drag: null};
+    // pickCut は画像の一覧を出しているカット案の id（カット案の一覧では ""）
+    const crop = {rect: null, image: null, pickCut: "", mode: "cover", iw: 0, ih: 0, x: 0, y: 0, w: 0, h: 0, scale: 1, ox: 0, oy: 0, drag: null};
+    let lastPickCut = "";       // 前に画像を選んだカット案。カット案の一覧で印を付ける
     const isCropOpen = () => view && !q(".ps-pg-crop").classList.contains("ps-off");
 
     function buildCrop() {
         q(".ps-pg-crop-cancel").addEventListener("click", closeCrop);
         q(".ps-pg-crop-ok").addEventListener("click", acceptCrop);
-        q(".ps-pg-crop-repick").addEventListener("click", () => showPicker());
+        // 選び直すときは、いま選んでいる画像のカット案の画像一覧に戻る
+        q(".ps-pg-crop-repick").addEventListener("click", () => (crop.image ? showCutImages(crop.image.cutId) : showPicker()));
+        q(".ps-pg-pick-back").addEventListener("click", () => showPicker());
         q(".ps-pg-crop-remove").addEventListener("click", () => {
             const rect = crop.rect;
             closeCrop();
@@ -914,18 +921,20 @@
         crop.rect = rect;
         crop.image = null;
         q(".ps-pg-crop").classList.remove("ps-off");
-        // はめ込み済みなら、その画像の範囲を直すところから始める（Book から外した画像でも直せる）
+        // はめ込み済みなら、その画像の範囲を直すところから始める
         const url = rect.image && ed.opts.resolve(rect.image, false);
         if (url) startCrop({cutId: rect.image.cutId, name: rect.image.name}, url);
         else showPicker();
     }
 
-    function showPicker() {
+    // 画像を選ぶ段階（カット案の一覧と画像の一覧）の共通の見た目にする
+    function pickStep(title, note) {
         crop.image = null;
-        q(".ps-pg-crop-title").textContent = "はめ込む画像を選択";
+        q(".ps-pg-crop-title").textContent = title;
         q(".ps-pg-crop-info").textContent = `コマ ${Math.round(crop.rect.w)} × ${Math.round(crop.rect.h)}`;
-        q(".ps-pg-crop-note").textContent = "この Book に登録した画像から選びます";
+        q(".ps-pg-crop-note").textContent = note;
         q(".ps-pg-crop-note").classList.remove("ps-pg-warn");
+        q(".ps-pg-pick-back").classList.toggle("ps-off", !crop.pickCut);
         q(".ps-pg-cropstage").classList.add("ps-off");
         q(".ps-pg-cropmode").classList.add("ps-off");
         q(".ps-pg-crop-ok").classList.add("ps-off");
@@ -934,25 +943,74 @@
         const grid = q(".ps-pg-pickgrid");
         grid.classList.remove("ps-off");
         grid.textContent = "";
-        const list = ed.opts.images();
-        if (!list.length) {
-            grid.appendChild(el("div", {class: "mtm-empty", text: "この Book にはまだ画像がありません。サムネイル一覧で画像を選んで「Book に追加」から登録します。"}));
-        }
+        grid.scrollTop = 0;
         refocus();
+        return grid;
+    }
+
+    // コマで使っている印（この Book のコマで使っている画像、カット案ではその画像のどれか）
+    const pickMark = (panels) => (panels && panels.length && ed.opts.panelMark ? [ed.opts.panelMark(panels)] : []);
+
+    // 1. カット案の一覧。シーンごとに見出しを付け、キー画像と枚数を出す。画像のないカット案は選べない
+    function showPicker() {
+        crop.pickCut = "";
+        const grid = pickStep("はめ込む画像を選択", "カット案を選ぶと、そのカット案の画像を一覧で出します");
+        const cuts = ed.opts.cuts();
+        if (!cuts.length) grid.appendChild(el("div", {class: "mtm-empty", text: "カット案がありません。"}));
+        const current = crop.rect.image ? crop.rect.image.cutId : lastPickCut;
+        let scene = null;
+        let focus = null;
+        for (const c of cuts) {
+            if (c.scene !== scene) {
+                scene = c.scene;
+                grid.appendChild(el("div", {class: "ps-pg-pickscene", text: scene || "（名前のないシーン）"}));
+            }
+            const item = el("button", {
+                type: "button", class: "ps-pg-pickitem ps-pg-pickcut" + (c.id === current ? " ps-on" : ""),
+                title: `${c.title}\n${c.count} 枚`, onclick: () => showCutImages(c.id),
+            }, [
+                c.thumb ? el("img", {src: c.thumb, alt: "", loading: "lazy", draggable: "false"}) : el("span", {class: "ps-pg-pickempty", text: "画像なし"}),
+                ...pickMark(c.panels),
+                el("span", {class: "ps-pg-pickitem-count", text: c.count + " 枚"}),
+                el("span", {class: "ps-pg-pickitem-label", text: c.title}),
+            ]);
+            if (!c.count) item.disabled = true;
+            if (c.id === current) focus = item;
+            grid.appendChild(item);
+        }
+        if (focus) focus.scrollIntoView({block: "nearest"});
+    }
+
+    // 2. カット案の画像の一覧（古い順）。いまはめ込んでいる画像には枠を付ける
+    function showCutImages(cutId) {
+        const cut = ed.opts.cuts().find((c) => c.id === cutId);
+        if (!cut) {
+            showPicker();
+            return;
+        }
+        crop.pickCut = cutId;
+        const grid = pickStep(`「${cut.title}」の画像を選択`, "画像を選ぶと、はめ込む範囲を決める画面に移ります");
+        const list = ed.opts.images(cutId);
+        if (!list.length) grid.appendChild(el("div", {class: "mtm-empty", text: "このカット案にはまだ画像がありません。"}));
         const current = crop.rect.image;
+        let focus = null;
         for (const x of list) {
             const on = current && current.cutId === x.cutId && current.name === x.name;
-            grid.appendChild(el("button", {type: "button", class: "ps-pg-pickitem" + (on ? " ps-on" : ""), title: `${x.label}\n${x.name}`, onclick: () => startCrop(x, ed.opts.resolve(x, false))}, [
+            const item = el("button", {type: "button", class: "ps-pg-pickitem" + (on ? " ps-on" : ""), title: x.name, onclick: () => startCrop(x, ed.opts.resolve(x, false))}, [
                 el("img", {src: x.thumb, alt: "", loading: "lazy", draggable: "false"}),
-                // この Book のコマで使っている画像には印を出す
-                ...(x.panels && x.panels.length && ed.opts.panelMark ? [ed.opts.panelMark(x.panels)] : []),
+                ...pickMark(x.panels),
                 el("span", {class: "ps-pg-pickitem-label", text: x.label}),
-            ]));
+            ]);
+            if (on) focus = item;
+            grid.appendChild(item);
         }
+        if (focus) focus.scrollIntoView({block: "nearest"});
     }
 
     function startCrop(ref, url) {
         crop.image = {cutId: ref.cutId, name: ref.name};
+        lastPickCut = ref.cutId;
+        q(".ps-pg-pick-back").classList.add("ps-off");
         q(".ps-pg-crop-title").textContent = "はめ込む範囲を決める";
         q(".ps-pg-crop-note").textContent = "";
         q(".ps-pg-pickgrid").classList.add("ps-off");
@@ -1056,6 +1114,7 @@
         q(".ps-pg-crop").classList.add("ps-off");
         crop.rect = null;
         crop.image = null;
+        crop.pickCut = "";
         crop.drag = null;
         refocus();
     }

@@ -2061,7 +2061,7 @@ body.mtm-fs-open {
     white-space: pre-line;
 }
 
-/* サムネイルの Book の印とコマの印（左下に並べる） */
+/* サムネイルのコマの印（左下に出す） */
 .ps-thumb-marks {
     position: absolute;
     left: 5px;
@@ -2075,16 +2075,7 @@ body.mtm-fs-open {
     pointer-events: auto;
 }
 
-.ps-thumb-book {
-    padding: 0 5px;
-    border-radius: 8px;
-    background: rgba(0, 0, 0, 0.6);
-    color: #fff;
-    font-size: 11px;
-    line-height: 17px;
-}
-
-/* コマで使っている印。Book の印と見分けられるようアクセント色にする */
+/* コマで使っている印。目立つようアクセント色にする */
 .ps-thumb-panel {
     display: inline-flex;
     align-items: center;
@@ -2105,70 +2096,6 @@ body.mtm-fs-open {
     fill: none;
     stroke: currentColor;
     stroke-width: 1.5;
-}
-
-/* Book に追加（サムネイル一覧のボタンの下に出す小さなパネル） */
-.ps-book-panel {
-    position: fixed;
-    z-index: 15;
-    box-sizing: border-box;
-    width: 320px;
-    max-width: calc(100vw - 16px);
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    padding: 10px;
-    border: 1px solid var(--border-color-primary);
-    border-radius: 8px;
-    background: var(--background-fill-primary);
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
-}
-
-.ps-book-panel.ps-qp-in {
-    animation: ps-cut-bar-in 0.12s ease-out;
-}
-
-.ps-book-choices {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-    max-height: 240px;
-    overflow-y: auto;
-    font-size: 13px;
-}
-
-.ps-book-choice {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    padding: 3px 4px;
-    border-radius: 4px;
-    cursor: pointer;
-}
-
-.ps-book-choice:hover {
-    background: var(--background-fill-secondary);
-}
-
-.ps-book-choice-title {
-    flex: 1;
-    min-width: 0;
-    overflow: hidden;
-    white-space: nowrap;
-    text-overflow: ellipsis;
-}
-
-.ps-book-choice-count {
-    flex: none;
-    font-size: 11px;
-    color: var(--body-text-color-subdued);
-}
-
-#mtm-fs .ps-book-new-title {
-    flex: 1;
-    min-width: 0;
-    padding: 3px 6px;
-    font-size: 12px;
 }
 
 /* Book の画面（左に Book の一覧、右に開いている Book） */
@@ -2315,17 +2242,6 @@ body.mtm-fs-open {
     box-shadow: inset -4px 0 0 var(--color-accent);
 }
 
-.ps-book-page.ps-missing {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-}
-
-.ps-book-missing {
-    font-size: 11px;
-    color: var(--body-text-color-subdued);
-}
-
 .ps-book-no {
     position: absolute;
     left: 5px;
@@ -2336,25 +2252,6 @@ body.mtm-fs-open {
     color: #fff;
     font-size: 11px;
     font-weight: 600;
-    line-height: 18px;
-}
-
-/* 番号とコマの印を左上に並べる */
-.ps-book-marks {
-    position: absolute;
-    left: 5px;
-    top: 5px;
-    display: flex;
-    align-items: center;
-    gap: 4px;
-}
-
-.ps-book-marks .ps-book-no {
-    position: static;
-}
-
-.ps-book-marks .ps-thumb-panel {
-    height: 18px;
     line-height: 18px;
 }
 
@@ -2583,6 +2480,54 @@ body.mtm-fs-open {
 
 .ps-pg-pickgrid > .mtm-empty {
     grid-column: 1 / -1;
+}
+
+/* カット案の一覧のシーンの見出し */
+.ps-pg-pickscene {
+    grid-column: 1 / -1;
+    padding: 6px 2px 0;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--body-text-color-subdued);
+    border-bottom: 1px solid var(--border-color-primary);
+}
+
+.ps-pg-pickscene:first-child {
+    padding-top: 0;
+}
+
+.ps-pg-pickitem:disabled {
+    cursor: default;
+    opacity: 0.5;
+}
+
+.ps-pg-pickitem:disabled:hover {
+    border-color: var(--border-color-primary);
+}
+
+.ps-pg-pickempty {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    font-size: 12px;
+    color: var(--body-text-color-subdued);
+}
+
+/* カット案の画像の枚数 */
+.ps-pg-pickitem-count {
+    position: absolute;
+    right: 5px;
+    top: 5px;
+    padding: 1px 6px;
+    border-radius: 8px;
+    background: rgba(0, 0, 0, 0.55);
+    color: #fff;
+    font-size: 11px;
+}
+
+#mtm-fs .ps-pg-pick-back {
+    align-self: center;
 }
 
 .ps-pg-pickitem {
