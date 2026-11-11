@@ -134,7 +134,8 @@
     let ed = null;      // {page, opts, tool, sel, undo, redo}
     let drag = null;
     // cropMode: 新しくはめ込むときの置き方。"cover" は拡大して合わせる、"full" は原寸
-    const prefs = {tool: "rect", line: 4, rect: 4, cropMode: "cover"};
+    // favOnly は画像選択の「お気に入りのみ」
+    const prefs = {tool: "rect", line: 4, rect: 4, cropMode: "cover", favOnly: false};
 
     const q = (sel) => view.querySelector(sel);
     // キー操作は画面の土台（#mtm-fs）で受ける。押したボタンが隠れるとフォーカスが外れるので戻す
@@ -153,6 +154,7 @@
             if (STROKES.includes(saved.line) && saved.line) prefs.line = saved.line;
             if (STROKES.includes(saved.rect)) prefs.rect = saved.rect;
             if (saved.cropMode === "full") prefs.cropMode = "full";
+            if (saved.favOnly === true) prefs.favOnly = true;
         } catch (e) { /* 覚えていなくても既定で使える */ }
     }
 
@@ -207,6 +209,7 @@
                         <span class="ps-pg-crop-title"></span>
                         <span class="ps-pg-crop-info"></span>
                         <span class="mtm-fs-spacer"></span>
+                        <label class="ps-fav-only ps-pg-favonly ps-off" title="お気に入り（♥）にした画像だけを出します。カット案の一覧では、お気に入りのあるカット案だけを出します"><input type="checkbox" class="ps-pg-favonly-check"> ♥ お気に入りのみ</label>
                         <span class="ps-pg-group ps-pg-cropmode ps-off">
                             <button type="button" class="mtm-btn" data-mode="cover" title="選んだ範囲をコマいっぱいに拡大・縮小します">拡大して合わせる</button>
                             <button type="button" class="mtm-btn" data-mode="full" title="画像を原寸のまま置きます。コマが画像より大きければ、残りは白い余白になります">原寸</button>
@@ -803,6 +806,13 @@
         // 選び直すときは、いま選んでいる画像のカット案の画像一覧に戻る
         q(".ps-pg-crop-repick").addEventListener("click", () => (crop.image ? showCutImages(crop.image.cutId) : showPicker()));
         q(".ps-pg-pick-back").addEventListener("click", () => showPicker());
+        // 「お気に入りのみ」は覚えておき、次に開くときも同じ状態にする。いま出している一覧を作り直す
+        q(".ps-pg-favonly-check").addEventListener("change", (e) => {
+            prefs.favOnly = e.target.checked;
+            savePrefs();
+            if (crop.pickCut) showCutImages(crop.pickCut);
+            else showPicker();
+        });
         q(".ps-pg-crop-remove").addEventListener("click", () => {
             const rect = crop.rect;
             closeCrop();
@@ -935,6 +945,8 @@
         q(".ps-pg-crop-note").textContent = note;
         q(".ps-pg-crop-note").classList.remove("ps-pg-warn");
         q(".ps-pg-pick-back").classList.toggle("ps-off", !crop.pickCut);
+        q(".ps-pg-favonly").classList.remove("ps-off");
+        q(".ps-pg-favonly-check").checked = prefs.favOnly;
         q(".ps-pg-cropstage").classList.add("ps-off");
         q(".ps-pg-cropmode").classList.add("ps-off");
         q(".ps-pg-crop-ok").classList.add("ps-off");
@@ -948,15 +960,34 @@
         return grid;
     }
 
-    // コマで使っている印（この Book のコマで使っている画像、カット案ではその画像のどれか）
-    const pickMark = (panels) => (panels && panels.length && ed.opts.panelMark ? [ed.opts.panelMark(panels)] : []);
+    // 左上の印。コマで使っている印（この Book のコマで使っている画像、カット案ではその画像のどれか）と、その隣にお気に入り。
+    // favorites はお気に入りの枚数（カット案）か true（画像）
+    function pickMarks(panels, favorites) {
+        const marks = [];
+        if (panels && panels.length && ed.opts.panelMark) marks.push(ed.opts.panelMark(panels));
+        if (favorites && ed.opts.favoriteMark) {
+            const mark = ed.opts.favoriteMark();
+            if (typeof favorites === "number") {
+                mark.textContent = "♥" + (favorites > 1 ? favorites : "");
+                mark.title = `お気に入り ${favorites} 枚`;
+            }
+            marks.push(mark);
+        }
+        return marks.length ? [el("span", {class: "ps-pg-pickmarks"}, marks)] : [];
+    }
 
-    // 1. カット案の一覧。シーンごとに見出しを付け、キー画像と枚数を出す。画像のないカット案は選べない
+    // 1. カット案の一覧。シーンごとに見出しを付け、キー画像と枚数を出す。画像のないカット案は選べない。
+    // 「お気に入りのみ」では、お気に入りのあるカット案だけを出し、枚数もお気に入りの枚数にする
     function showPicker() {
         crop.pickCut = "";
+        const favOnly = prefs.favOnly;
         const grid = pickStep("はめ込む画像を選択", "カット案を選ぶと、そのカット案の画像を一覧で出します");
-        const cuts = ed.opts.cuts();
-        if (!cuts.length) grid.appendChild(el("div", {class: "mtm-empty", text: "カット案がありません。"}));
+        const all = ed.opts.cuts();
+        const cuts = favOnly ? all.filter((c) => c.favorites) : all;
+        if (!cuts.length) {
+            grid.appendChild(el("div", {class: "mtm-empty", text: !all.length ? "カット案がありません。"
+                : "お気に入りの画像のあるカット案がありません。サムネイル一覧のビューワーの「♡ お気に入り」（F キー）で付けられます。"}));
+        }
         const current = crop.rect.image ? crop.rect.image.cutId : lastPickCut;
         let scene = null;
         let focus = null;
@@ -965,13 +996,14 @@
                 scene = c.scene;
                 grid.appendChild(el("div", {class: "ps-pg-pickscene", text: scene || "（名前のないシーン）"}));
             }
+            const count = favOnly ? `♥ ${c.favorites} / ${c.count} 枚` : c.count + " 枚";
             const item = el("button", {
                 type: "button", class: "ps-pg-pickitem ps-pg-pickcut" + (c.id === current ? " ps-on" : ""),
-                title: `${c.title}\n${c.count} 枚`, onclick: () => showCutImages(c.id),
+                title: `${c.title}\n${c.count} 枚` + (c.favorites ? `（お気に入り ${c.favorites} 枚）` : ""), onclick: () => showCutImages(c.id),
             }, [
                 c.thumb ? el("img", {src: c.thumb, alt: "", loading: "lazy", draggable: "false"}) : el("span", {class: "ps-pg-pickempty", text: "画像なし"}),
-                ...pickMark(c.panels),
-                el("span", {class: "ps-pg-pickitem-count", text: c.count + " 枚"}),
+                ...pickMarks(c.panels, c.favorites),
+                el("span", {class: "ps-pg-pickitem-count", text: count}),
                 el("span", {class: "ps-pg-pickitem-label", text: c.title}),
             ]);
             if (!c.count) item.disabled = true;
@@ -981,7 +1013,7 @@
         if (focus) focus.scrollIntoView({block: "nearest"});
     }
 
-    // 2. カット案の画像の一覧（古い順）。いまはめ込んでいる画像には枠を付ける
+    // 2. カット案の画像の一覧（古い順）。いまはめ込んでいる画像には枠を付ける。「お気に入りのみ」ではお気に入りだけを出す
     function showCutImages(cutId) {
         const cut = ed.opts.cuts().find((c) => c.id === cutId);
         if (!cut) {
@@ -990,15 +1022,18 @@
         }
         crop.pickCut = cutId;
         const grid = pickStep(`「${cut.title}」の画像を選択`, "画像を選ぶと、はめ込む範囲を決める画面に移ります");
-        const list = ed.opts.images(cutId);
-        if (!list.length) grid.appendChild(el("div", {class: "mtm-empty", text: "このカット案にはまだ画像がありません。"}));
+        const all = ed.opts.images(cutId);
+        const list = prefs.favOnly ? all.filter((x) => x.favorite) : all;
+        if (!list.length) {
+            grid.appendChild(el("div", {class: "mtm-empty", text: all.length ? "このカット案にはお気に入りの画像がありません。" : "このカット案にはまだ画像がありません。"}));
+        }
         const current = crop.rect.image;
         let focus = null;
         for (const x of list) {
             const on = current && current.cutId === x.cutId && current.name === x.name;
             const item = el("button", {type: "button", class: "ps-pg-pickitem" + (on ? " ps-on" : ""), title: x.name, onclick: () => startCrop(x, ed.opts.resolve(x, false))}, [
                 el("img", {src: x.thumb, alt: "", loading: "lazy", draggable: "false"}),
-                ...pickMark(x.panels),
+                ...pickMarks(x.panels, x.favorite),
                 el("span", {class: "ps-pg-pickitem-label", text: x.label}),
             ]);
             if (on) focus = item;
@@ -1011,6 +1046,7 @@
         crop.image = {cutId: ref.cutId, name: ref.name};
         lastPickCut = ref.cutId;
         q(".ps-pg-pick-back").classList.add("ps-off");
+        q(".ps-pg-favonly").classList.add("ps-off");
         q(".ps-pg-crop-title").textContent = "はめ込む範囲を決める";
         q(".ps-pg-crop-note").textContent = "";
         q(".ps-pg-pickgrid").classList.add("ps-off");

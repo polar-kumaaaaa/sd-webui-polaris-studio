@@ -207,6 +207,7 @@
                         <option value="queue">キュー</option>
                         <option value="i2i">i2i</option>
                     </select>
+                    <label class="ps-fav-only" title="お気に入り（♥）にした画像だけを出します"><input type="checkbox" class="ps-gallery-fav"> ♥ お気に入りのみ</label>
                     <label><input type="checkbox" class="ps-gallery-all"> すべて選択</label>
                     <span class="mtm-fs-spacer"></span>
                     <span class="ps-gallery-selinfo" title="選択はカット案をまたいで残ります"></span>
@@ -270,12 +271,14 @@
             <div class="ps-viewer ps-off">
                 <div class="ps-viewer-bar">
                     <span class="ps-viewer-name"></span>
+                    <span class="ps-viewer-marks"></span>
                     <span class="mtm-fs-spacer"></span>
                     <button type="button" class="mtm-btn ps-zoom-out" title="縮小">－</button>
                     <span class="ps-viewer-size"></span>
                     <button type="button" class="mtm-btn ps-zoom-in" title="拡大">＋</button>
                     <button type="button" class="mtm-btn ps-zoom-fit">フィット</button>
                     <button type="button" class="mtm-btn ps-zoom-full">原寸</button>
+                    <button type="button" class="mtm-btn ps-view-fav" title="お気に入りにする・外す (F)">♡ お気に入り</button>
                     <button type="button" class="mtm-btn ps-view-key">キー画像に指定</button>
                     <button type="button" class="mtm-btn ps-view-restore" title="この画像の生成情報のプロンプトをカット案に戻す">プロンプトを戻す</button>
                     <button type="button" class="mtm-btn ps-view-i2i" title="WebUI のインペイントに送る。生成した画像はこのカット案に保存される">インペイントに送る</button>
@@ -351,6 +354,7 @@
         q(".ps-gallery-back").addEventListener("click", closeGallery);
         q(".ps-gallery-search").addEventListener("input", renderGallery);
         q(".ps-gallery-source").addEventListener("change", renderGallery);
+        q(".ps-gallery-fav").addEventListener("change", renderGallery);
         // 「すべて選択」は今開いているカット案の中だけ。ほかのカット案の選択は残す
         q(".ps-gallery-all").addEventListener("change", (e) => {
             for (const k of selectedOf(galleryCut)) selectedImages.delete(selKey(galleryCut, k));
@@ -391,6 +395,7 @@
         q(".ps-nav-prev").addEventListener("click", () => moveImage(-1));
         q(".ps-nav-next").addEventListener("click", () => moveImage(1));
         q(".ps-viewer-close").addEventListener("click", () => hide(".ps-viewer"));
+        q(".ps-view-fav").addEventListener("click", toggleViewFavorite);
         q(".ps-view-key").addEventListener("click", () => setKeyImage(viewCut, viewImage.name));
         q(".ps-view-restore").addEventListener("click", restorePromptFromImage);
         q(".ps-view-i2i").addEventListener("click", sendToImg2img);
@@ -458,6 +463,13 @@
             e.preventDefault();
             e.stopPropagation();
             moveImage(e.key === "ArrowLeft" ? -1 : 1);
+            return;
+        }
+        if (viewer && !isOpen(".ps-delete-dialog") && (e.key === "f" || e.key === "F") && !e.ctrlKey && !e.metaKey && !e.altKey
+            && !e.target.closest("input, textarea, select")) {
+            e.preventDefault();
+            e.stopPropagation();
+            toggleViewFavorite();
             return;
         }
         if (e.key !== "Escape") return;
@@ -1006,7 +1018,7 @@
         return {
             id: newId(), title: "", positive: "", negative: "",
             width: 0, height: 0,
-            steps: 50, seed: -1, subseed: -1, subseedStrength: 0, keyImage: "", history: [],
+            steps: 50, seed: -1, subseed: -1, subseedStrength: 0, keyImage: "", favorites: [], history: [],
             createdAt: new Date().toISOString(),
             ...fields,
         };
@@ -1045,7 +1057,7 @@
     async function duplicateCut(scene, cut) {
         const copy = {
             ...JSON.parse(JSON.stringify(cut)),
-            id: newId(), title: cut.title + " のコピー", keyImage: "", history: [],
+            id: newId(), title: cut.title + " のコピー", keyImage: "", favorites: [], history: [],
             createdAt: new Date().toISOString(),
         };
         scene.cuts.splice(scene.cuts.indexOf(cut) + 1, 0, copy);
@@ -1111,7 +1123,29 @@
         ]);
     }
 
+    // ---------- お気に入り ----------
+    // カット案ごとに、お気に入りにした画像の名前を favorites に持つ。画像を消したら外す
+
+    const isFavorite = (cut, name) => Array.isArray(cut.favorites) && cut.favorites.includes(name);
+    const favoriteMark = () => el("span", {class: "ps-thumb-fav", title: "お気に入り", text: "♥"});
+
+    async function toggleFavorite(cut, name) {
+        if (!Array.isArray(cut.favorites)) cut.favorites = [];
+        if (isFavorite(cut, name)) cut.favorites = cut.favorites.filter((x) => x !== name);
+        else cut.favorites.push(name);
+        if (isOpen(".ps-gallery-view") && galleryCut === cut) renderGallery();
+        await saveProjects();
+    }
+
+    // 消えた画像（selKey の形）をお気に入りから外す
+    function removeFavorites(keys) {
+        for (const cut of cutsOf(project)) {
+            if (Array.isArray(cut.favorites)) cut.favorites = cut.favorites.filter((name) => !keys.includes(selKey(cut, name)));
+        }
+    }
+
     function makeThumb(p, cut, image, {on, selected, mark, label, onclick, select, panels}) {
+        const fav = isFavorite(cut, image.name);
         const thumb = el("button", {type: "button", class: "ps-thumb" + (on ? " ps-on" : "") + (selected ? " ps-selected" : ""), title: image.name}, [
             el("img", {src: imageUrl(p, cut, image, true), alt: "", loading: "lazy"}),
             ...(mark ? [el("span", {class: "ps-thumb-mark", text: mark})] : []),
@@ -1120,8 +1154,11 @@
                 select(e);
             }})] : []),
             ...(label ? [el("span", {class: "ps-thumb-label", text: label})] : []),
-            // はめ込んでいるコマ（削除するときは確認で知らせる）
-            ...(panels && panels.length ? [el("span", {class: "ps-thumb-marks"}, [panelMark(panels)])] : []),
+            // はめ込んでいるコマ（削除するときは確認で知らせる）と、その隣にお気に入り
+            ...((panels && panels.length) || fav ? [el("span", {class: "ps-thumb-marks"}, [
+                ...(panels && panels.length ? [panelMark(panels)] : []),
+                ...(fav ? [favoriteMark()] : []),
+            ])] : []),
         ]);
         thumb.dataset.name = image.name;
         thumb.addEventListener("click", onclick);
@@ -1698,13 +1735,16 @@
                 const list = imagesOf(project, cut);
                 const pages = [...new Set(list.flatMap((image) => panelPages(selKey(cut, image.name), [book], false)))].sort();
                 return {id: cut.id, title: cut.title, scene: scene.name, count: list.length,
+                    favorites: list.filter((image) => isFavorite(cut, image.name)).length,
                     thumb: key ? imageUrl(project, cut, key, true) : "", panels: pages};
             })),
             images: (cutId) => {
                 const cut = cutsOf(project).find((c) => c.id === cutId);
-                return cut ? imagesOf(project, cut).map((image, i) => ({cutId, name: image.name, label: String(i + 1),
+                return cut ? imagesOf(project, cut).map((image, i) => ({cutId, name: image.name, label: String(i + 1), favorite: isFavorite(cut, image.name),
                     thumb: imageUrl(project, cut, image, true), panels: panelPages(selKey(cut, image.name), [book], false)})) : [];
             },
+            // お気に入りの印（サムネイル一覧と同じもの）
+            favoriteMark,
             // コマで使っている印（サムネイル一覧と同じもの）
             panelMark,
             resolve: (ref, thumb) => {
@@ -2059,6 +2099,7 @@
         selectAnchor = "";
         q(".ps-gallery-search").value = "";
         q(".ps-gallery-source").value = "";
+        q(".ps-gallery-fav").checked = false;
         await loadImages(project);
         renderGallery();
         view.classList.remove("ps-off");
@@ -2139,8 +2180,10 @@
     function visibleImages() {
         const word = q(".ps-gallery-search").value.trim().toLowerCase();
         const source = q(".ps-gallery-source").value;
+        const favOnly = q(".ps-gallery-fav").checked;
         return imagesOf(project, galleryCut).filter((x) => {
             if (source && sourceKind(x) !== source) return false;
+            if (favOnly && !isFavorite(galleryCut, x.name)) return false;
             return !word || [x.prompt, x.negative, x.seed, x.steps, x.sampler, x.model, x.source, x.name].join(" ").toLowerCase().includes(word);
         });
     }
@@ -2160,7 +2203,10 @@
         const key = keyImageOf(project, cut);
         const thumbs = q(".ps-gallery-thumbs");
         thumbs.textContent = "";
-        if (!list.length) thumbs.appendChild(el("div", {class: "mtm-empty", text: total ? "条件に合う画像がありません" : "まだ画像がありません"}));
+        const emptyText = !total ? "まだ画像がありません"
+            : q(".ps-gallery-fav").checked && !(cut.favorites || []).length ? "お気に入りの画像はまだありません。ビューワーの「♡ お気に入り」（F キー）で付けられます"
+            : "条件に合う画像がありません";
+        if (!list.length) thumbs.appendChild(el("div", {class: "mtm-empty", text: emptyText}));
         for (const image of list) {
             thumbs.appendChild(makeThumb(project, cut, image, {
                 selected: selectedImages.has(selKey(cut, image.name)),
@@ -2339,6 +2385,7 @@
         }
         keys.forEach((k) => selectedImages.delete(k));
         removeFromBooks((r) => keys.includes(refKey(r)));
+        removeFavorites(keys);
         renderGallery();
         refreshViews();
         if (isOpen(".ps-viewer")) {
@@ -2394,6 +2441,7 @@
         galleryCut = cut;
         q(".ps-gallery-search").value = "";
         q(".ps-gallery-source").value = "";
+        q(".ps-gallery-fav").checked = false;
         openViewer(image);
     }
 
@@ -2419,12 +2467,34 @@
         keyButton.classList.toggle("ps-view-key-on", isKey);
         keyButton.textContent = isKey ? "キー画像" : "キー画像に指定";
         q(".ps-view-restore").disabled = !image.prompt;
+        renderViewMarks();
         renderImageInfo(image);
         fitting = true;
         const url = imageUrl(project, cut, image, false);
         const img = q(".ps-viewer-image");
         if (img.getAttribute("src") === url) applyZoom();
         else img.src = url;
+    }
+
+    // 名前の右に、コマで使っている印とお気に入りの印を出す（サムネイルと同じもの）。お気に入りのボタンの表示もそろえる
+    function renderViewMarks() {
+        const key = selKey(viewCut, viewImage.name);
+        const panels = panelPages(key, project.books, true);
+        const fav = isFavorite(viewCut, viewImage.name);
+        const box = q(".ps-viewer-marks");
+        box.textContent = "";
+        if (panels.length) box.appendChild(panelMark(panels));
+        if (fav) box.appendChild(favoriteMark());
+        const button = q(".ps-view-fav");
+        button.textContent = fav ? "♥ お気に入り" : "♡ お気に入り";
+        button.classList.toggle("ps-view-fav-on", fav);
+    }
+
+    async function toggleViewFavorite() {
+        if (!viewImage || !viewCut) return;
+        const done = toggleFavorite(viewCut, viewImage.name);
+        renderViewMarks();
+        await done;
     }
 
     function renderImageInfo(image) {

@@ -1569,6 +1569,23 @@ body.mtm-fs-open {
     opacity: 1;
 }
 
+/* お気に入りにしている画像のボタン */
+#mtm-fs .mtm-btn.ps-view-fav-on {
+    border-color: #db2777;
+    color: #db2777;
+}
+
+/* ビューワーの名前の右の印（コマで使っている印・お気に入り） */
+.ps-viewer-marks {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.ps-viewer-marks:empty {
+    display: none;
+}
+
 .ps-viewer-size {
     min-width: 52px;
     text-align: center;
@@ -2090,6 +2107,32 @@ body.mtm-fs-open {
     line-height: 17px;
 }
 
+/* お気に入りの印。コマの印の隣に出す */
+.ps-thumb-fav {
+    display: inline-flex;
+    align-items: center;
+    height: 17px;
+    padding: 0 5px;
+    border-radius: 8px;
+    background: #db2777;
+    color: #fff;
+    font-size: 11px;
+    font-weight: 600;
+    line-height: 17px;
+}
+
+/* 「♥ お気に入りのみ」の絞り込み */
+.ps-fav-only {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    white-space: nowrap;
+}
+
+.ps-fav-only:has(input:checked) {
+    color: #db2777;
+}
+
 .ps-thumb-panel svg {
     width: 12px;
     height: 12px;
@@ -2552,10 +2595,18 @@ body.mtm-fs-open {
     object-fit: cover;
 }
 
-.ps-pg-pickitem .ps-thumb-panel {
+/* 左上の印（コマで使っている印・お気に入り） */
+.ps-pg-pickmarks {
     position: absolute;
     left: 5px;
     top: 5px;
+    display: flex;
+    gap: 4px;
+}
+
+#mtm-fs .ps-pg-favonly {
+    align-self: center;
+    font-size: 12px;
 }
 
 .ps-pg-pickitem-label {

@@ -369,6 +369,9 @@ def _sanitize_cut(raw):
         **_image_size(raw),
         **_generation_params(raw, 50),
         "keyImage": str(raw.get("keyImage", "")),
+        # お気に入りにした画像の名前（カット案のフォルダの中の名前だけ）
+        "favorites": _unique_strings(os.path.basename(str(x)) for x in raw.get("favorites") if isinstance(x, str))
+        if isinstance(raw.get("favorites"), list) else [],
         # 編集画面の「追加したタグ」の並び（カードの id）。None はまだ一度も保存していないカット案で、開いたときにテキストから作る
         "picks": _unique_strings(raw.get("picks")) if isinstance(raw.get("picks"), list) else None,
         "history": [
