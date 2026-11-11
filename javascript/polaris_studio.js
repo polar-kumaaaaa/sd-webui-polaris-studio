@@ -335,6 +335,7 @@
                 <div class="mtm-fs-bar">
                     <button type="button" class="mtm-btn mtm-fs-back">← 戻る</button>
                     <input type="text" class="ps-title-input mtm-fs-cut-title" title="カット案のタイトル">
+                    <span class="mtm-fs-param" title="このカット案で生成する画像のサイズ（幅 × 高さ、8 の倍数）。プレビューとキューの生成に使います。空欄のときは WebUI の設定のままで、最初に生成した画像のサイズを覚えます">サイズ<input type="number" class="mtm-fs-width" min="64" max="2048" step="8" placeholder="幅">×<input type="number" class="mtm-fs-height" min="64" max="2048" step="8" placeholder="高さ"><button type="button" class="mtm-icon mtm-fs-size-swap" title="幅と高さを入れ替える（縦長 ⇄ 横長）">⇄</button></span>
                     <label class="mtm-fs-param" title="このカット案のプレビューの Sampling steps">Steps<input type="number" class="mtm-fs-steps" min="1" step="1"></label>
                     <span class="mtm-fs-param" title="このカット案のプレビューの Seed（-1 でランダム）">Seed<input type="number" class="mtm-fs-seed" step="1"><button type="button" class="mtm-icon mtm-fs-seed-random" title="ランダム（-1）にする">🎲</button></span>
                     <span class="mtm-fs-param" title="このカット案のプレビューの Variation seed（-1 でランダム。Var が 0 のときは生成に使われません）">Var Seed<input type="number" class="mtm-fs-subseed" step="1"><button type="button" class="mtm-icon mtm-fs-subseed-random" title="ランダム（-1）にする">🎲</button></span>
@@ -469,6 +470,12 @@
         fq(".ps-editor").addEventListener("input", (e) => {
             // 手でテキストを書き換えたら、右側の「テキストにない」の印を付け直す
             if (e.target.matches(".ps-ed-pos-text, .ps-ed-neg-text")) renderPicks();
+            updateDirty();
+        });
+        fq(".mtm-fs-size-swap").addEventListener("click", () => {
+            const w = fq(".mtm-fs-width");
+            const h = fq(".mtm-fs-height");
+            [w.value, h.value] = [h.value, w.value];
             updateDirty();
         });
         for (const name of ["seed", "subseed"]) {
@@ -608,6 +615,8 @@
         posArea().value = cut.positive;
         negArea().value = cut.negative;
         fq(".mtm-fs-cut-title").value = cut.title;
+        fq(".mtm-fs-width").value = cut.width || "";
+        fq(".mtm-fs-height").value = cut.height || "";
         fq(".mtm-fs-steps").value = cut.steps;
         fq(".mtm-fs-seed").value = cut.seed;
         fq(".mtm-fs-subseed").value = cut.subseed;
@@ -665,8 +674,17 @@
             return fq(sel).value.trim() === "" || !Number.isFinite(v) ? fallback : Math.max(v, min);
         };
         const strength = Number(fq(".mtm-fs-var").value);
+        // サイズは 8 の倍数（64〜2048）にそろえる。幅と高さのどちらかが空なら、サイズは決めない（0）
+        const size = (sel) => {
+            const v = Number(fq(sel).value);
+            return fq(sel).value.trim() === "" || !Number.isFinite(v) || v <= 0 ? 0 : Math.min(Math.max(Math.round(v / 8) * 8, 64), 2048);
+        };
+        const width = size(".mtm-fs-width");
+        const height = size(".mtm-fs-height");
         return {
             title: fq(".mtm-fs-cut-title").value.trim() || editor.cut.title,
+            width: width && height ? width : 0,
+            height: width && height ? height : 0,
             steps: int(".mtm-fs-steps", 1, 50),
             seed: int(".mtm-fs-seed", -1, -1),
             subseed: int(".mtm-fs-subseed", -1, -1),
@@ -685,7 +703,8 @@
 
     function paramsDirty() {
         const p = readParams();
-        return Object.keys(p).some((k) => p[k] !== editor.cut[k]);
+        // サイズを持たない古いカット案は 0（決めていない）として比べる
+        return Object.keys(p).some((k) => p[k] !== (k === "width" || k === "height" ? editor.cut[k] || 0 : editor.cut[k]));
     }
 
     function fsDirty() {
@@ -1306,7 +1325,7 @@
         writeField(webuiSeedInput(tab, "seed"), String(job.seed));
         writeField(webuiSeedInput(tab, "subseed"), String(job.subseed));
         writeVariationStrength(job.subseedStrength, tab);
-        // 再生成のように元の画像と同じ構図にしたいときだけ、サイズも書き込む
+        // カット案や元の画像のサイズが決まっているときだけ、サイズも書き込む（決まっていなければ WebUI の設定のまま）
         if (job.width && job.height) {
             writeWebuiValue("width", job.width, tab);
             writeWebuiValue("height", job.height, tab);

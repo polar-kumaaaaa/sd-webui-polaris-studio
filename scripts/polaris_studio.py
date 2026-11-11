@@ -377,6 +377,8 @@ def _sanitize_cut(raw):
         "title": str(raw.get("title", "")).strip(),
         "positive": str(raw.get("positive", "")),
         "negative": str(raw.get("negative", "")),
+        # 生成する画像のサイズ。0 はまだ決めていない（WebUI の設定のまま生成する）
+        **_image_size(raw),
         **_generation_params(raw, 50),
         "keyImage": str(raw.get("keyImage", "")),
         # 編集画面の「追加したタグ」の並び（カードの id）。None はまだ一度も保存していないカット案で、開いたときにテキストから作る
@@ -400,6 +402,7 @@ def _sanitize_queue(raw):
         "cutTitle": str(raw.get("cutTitle", "")),
         "positive": str(raw.get("positive", "")),
         "negative": str(raw.get("negative", "")),
+        **_image_size(raw),
         **_generation_params(raw, 37),
         "batch": _positive_int(raw.get("batch"), 10),
         # "regen" は、選んだ画像を元のプロンプトと Seed のまま Steps だけ変えて 1 枚ずつ作り直すキュー
@@ -414,22 +417,26 @@ def _sanitize_queue(raw):
 def _sanitize_regen_image(raw):
     params = _generation_params(raw, 1)
     del params["steps"]
-
-    def size(value):
-        try:
-            return max(0, int(value))
-        except (TypeError, ValueError):
-            return 0
-
     return {
         "cutId": str(raw.get("cutId", "")),
         "name": os.path.basename(str(raw.get("name", ""))),
         "positive": str(raw.get("positive", "")),
         "negative": str(raw.get("negative", "")),
         **params,
-        "width": size(raw.get("width")),
-        "height": size(raw.get("height")),
+        **_image_size(raw),
     }
+
+
+def _image_size(raw):
+    # 幅と高さはそろって決まっているときだけ残す。どちらかがなければ両方 0
+    def size(value):
+        try:
+            return max(0, int(value))
+        except (TypeError, ValueError):
+            return 0
+
+    width, height = size(raw.get("width")), size(raw.get("height"))
+    return {"width": width, "height": height} if width and height else {"width": 0, "height": 0}
 
 
 def _generation_params(raw, default_steps):

@@ -1031,14 +1031,38 @@
     function newCut(fields) {
         return {
             id: newId(), title: "", positive: "", negative: "",
+            width: 0, height: 0,
             steps: 50, seed: -1, subseed: -1, subseedStrength: 0, keyImage: "", history: [],
             createdAt: new Date().toISOString(),
             ...fields,
         };
     }
 
+    // 新しいカット案のサイズは、同じシーンで最後にサイズを決めたカット案（なければプロジェクト全体で最後のもの）から引き継ぐ
+    function inheritedSize(scene) {
+        const sized = (list) => [...list].reverse().find((c) => c.width && c.height);
+        const from = sized(scene.cuts) || sized(cutsOf(project));
+        return from ? {width: from.width, height: from.height} : {};
+    }
+
+    // 画像の生成情報のサイズ（"832 x 1216" や "832x1216"）を {width, height} にする。読めなければ null
+    function parseSize(text) {
+        const m = String(text || "").match(/(\d+)\s*x\s*(\d+)/);
+        return m && Number(m[1]) && Number(m[2]) ? {width: Number(m[1]), height: Number(m[2])} : null;
+    }
+
+    // サイズを決めていないカット案は、生成した画像のサイズを覚える。覚えたら true
+    function adoptSize(p, cut) {
+        if (cut.width && cut.height) return false;
+        const list = imagesOf(p, cut);
+        const size = list.length && parseSize(list[list.length - 1].size);
+        if (!size) return false;
+        Object.assign(cut, size);
+        return true;
+    }
+
     async function addCut(scene) {
-        scene.cuts.push(newCut({title: "カット案 " + (scene.cuts.length + 1)}));
+        scene.cuts.push(newCut({title: "カット案 " + (scene.cuts.length + 1), ...inheritedSize(scene)}));
         renderScenes();
         await saveProjects();
     }
@@ -1248,9 +1272,11 @@
             await window.PolarisStudio.generate({
                 project: p.id, cut: cut.id, source: "preview",
                 positive: cut.positive, negative: cut.negative,
+                width: cut.width, height: cut.height,
                 steps: cut.steps, batch: 1, seed: cut.seed, subseed: cut.subseed, subseedStrength: cut.subseedStrength,
             });
             await loadImages(p);
+            if (adoptSize(p, cut)) await saveProjects();
             const list = imagesOf(p, cut);
             if (list.length > before) {
                 const image = list[list.length - 1];
@@ -1370,6 +1396,8 @@
             cutTitle: cut.title,
             positive: cut.positive,
             negative: cut.negative,
+            width: cut.width || 0,
+            height: cut.height || 0,
             ...readQueueForm(),
             status: "waiting",
             createdAt: new Date().toISOString(),
@@ -1381,7 +1409,7 @@
         await saveProjects();
     }
 
-    const queueValues = (x) => `Steps ${x.steps} / Batch ${x.batch} / Seed ${x.seed < 0 ? "ランダム" : x.seed} / Var Seed ${x.subseed < 0 ? "ランダム" : x.subseed} / Var ${x.subseedStrength}`;
+    const queueValues = (x) => `サイズ ${x.width && x.height ? `${x.width}×${x.height}` : "WebUI のまま"} / Steps ${x.steps} / Batch ${x.batch} / Seed ${x.seed < 0 ? "ランダム" : x.seed} / Var Seed ${x.subseed < 0 ? "ランダム" : x.subseed} / Var ${x.subseedStrength}`;
 
     // 登録済みの件数だけを出す。中身の確認・削除・実行はキュー管理で行う
     function renderQueueRows(added = "") {
@@ -2119,10 +2147,14 @@
                 try {
                     await window.PolarisStudio.generate({
                         project: p.id, cut: x.cutId, source: x.name,
-                        positive: x.positive, negative: x.negative,
+                        positive: x.positive, negative: x.negative, width: x.width, height: x.height,
                         steps: x.steps, batch: x.batch, seed: x.seed, subseed: x.subseed, subseedStrength: x.subseedStrength,
                     });
                     if (!run.abort) x.status = "done";
+                    // サイズを決めずに登録したキューなら、カット案に生成した画像のサイズを覚える
+                    if (!(x.width && x.height) && !(cut.width && cut.height)) {
+                        await loadImages(p).then(() => adoptSize(p, cut), () => {});
+                    }
                 } catch (e) {
                     console.error("[Polaris Studio] queue failed", e);
                     failure = e.message;
@@ -2881,6 +2913,7 @@
                 title: file.name.replace(/\.[^.]+$/, ""),
                 positive: p.Prompt || "",
                 negative: p["Negative prompt"] || "",
+                ...(parseSize(`${p["Size-1"]}x${p["Size-2"]}`) || {}),
                 steps: number(p.Steps, 50),
                 seed: number(p.Seed, -1),
                 subseed: number(p["Variation seed"], -1),

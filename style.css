@@ -306,6 +306,11 @@ body.mtm-fs-open {
     padding: 4px 6px;
 }
 
+#mtm-fs .mtm-fs-param input.mtm-fs-width,
+#mtm-fs .mtm-fs-param input.mtm-fs-height {
+    width: 72px;
+}
+
 #mtm-fs .mtm-fs-param input.mtm-fs-seed,
 #mtm-fs .mtm-fs-param input.mtm-fs-subseed {
     /* 10 桁のシードと数値欄の上下ボタンが収まる幅 */
