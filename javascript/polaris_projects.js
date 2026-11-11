@@ -1827,8 +1827,11 @@
             // はめ込む画像は、この Book に登録した画像から選ぶ
             images: () => imageItems(book).map((r) => {
                 const found = findImage(r);
-                return found && {cutId: r.cutId, name: r.name, thumb: imageUrl(project, found.cut, found.image, true), label: found.cut.title};
+                return found && {cutId: r.cutId, name: r.name, thumb: imageUrl(project, found.cut, found.image, true), label: found.cut.title,
+                    panels: panelPages(refKey(r), [book], false)};
             }).filter(Boolean),
+            // コマで使っている印（サムネイル一覧と同じもの）
+            panelMark,
             resolve: (ref, thumb) => {
                 const found = findImage(ref);
                 return found ? imageUrl(project, found.cut, found.image, thumb) : null;

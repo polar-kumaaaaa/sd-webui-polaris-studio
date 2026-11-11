@@ -2602,6 +2602,12 @@ body.mtm-fs-open {
     object-fit: cover;
 }
 
+.ps-pg-pickitem .ps-thumb-panel {
+    position: absolute;
+    left: 5px;
+    top: 5px;
+}
+
 .ps-pg-pickitem-label {
     position: absolute;
     left: 0;

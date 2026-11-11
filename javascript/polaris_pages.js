@@ -944,6 +944,8 @@
             const on = current && current.cutId === x.cutId && current.name === x.name;
             grid.appendChild(el("button", {type: "button", class: "ps-pg-pickitem" + (on ? " ps-on" : ""), title: `${x.label}\n${x.name}`, onclick: () => startCrop(x, ed.opts.resolve(x, false))}, [
                 el("img", {src: x.thumb, alt: "", loading: "lazy", draggable: "false"}),
+                // この Book のコマで使っている画像には印を出す
+                ...(x.panels && x.panels.length && ed.opts.panelMark ? [ed.opts.panelMark(x.panels)] : []),
                 el("span", {class: "ps-pg-pickitem-label", text: x.label}),
             ]));
         }
