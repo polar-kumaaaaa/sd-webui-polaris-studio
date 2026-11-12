@@ -135,7 +135,9 @@
     let drag = null;
     // cropMode: 新しくはめ込むときの置き方。"cover" は拡大して合わせる、"full" は原寸
     // favOnly は画像選択の「お気に入りのみ」
-    const prefs = {tool: "rect", line: 4, rect: 4, cropMode: "cover", favOnly: false};
+    // count は編集画面に並べるコマページの枚数（1〜3）
+    const prefs = {tool: "rect", line: 4, rect: 4, cropMode: "cover", favOnly: false, count: 1};
+    const PAGE_COUNTS = [1, 2, 3];
 
     const q = (sel) => view.querySelector(sel);
     // キー操作は画面の土台（#mtm-fs）で受ける。押したボタンが隠れるとフォーカスが外れるので戻す
@@ -155,6 +157,7 @@
             if (STROKES.includes(saved.rect)) prefs.rect = saved.rect;
             if (saved.cropMode === "full") prefs.cropMode = "full";
             if (saved.favOnly === true) prefs.favOnly = true;
+            if (PAGE_COUNTS.includes(saved.count)) prefs.count = saved.count;
         } catch (e) { /* 覚えていなくても既定で使える */ }
     }
 
@@ -172,6 +175,10 @@
                 <button type="button" class="mtm-btn ps-pg-back">← Book</button>
                 <span class="mtm-fs-title">コマページ</span>
                 <span class="mtm-fs-target ps-pg-where" title="キャンバスの上でホイールを回すか PageUp・PageDown で、Book の前後のコマページに移ります"></span>
+                <span class="ps-pg-group ps-pg-counts" title="並べて表示するコマページの枚数。右から Book の順に並びます（漫画の見開きと同じ）。編集するのは枠の付いたページで、ほかのページはクリックすると編集できます">
+                    <span class="ps-pg-label">表示</span>
+                    ${PAGE_COUNTS.map((n) => `<button type="button" class="mtm-btn" data-count="${n}">${n} 枚</button>`).join("")}
+                </span>
                 <span class="mtm-fs-spacer"></span>
                 <button type="button" class="mtm-btn ps-pg-undo" title="元に戻す (Ctrl+Z)">↶ 元に戻す</button>
                 <button type="button" class="mtm-btn ps-pg-redo" title="やり直す (Ctrl+Y)">↷ やり直す</button>
@@ -242,6 +249,7 @@
         q(".ps-pg-redo").addEventListener("click", redo);
         view.querySelectorAll("[data-tool]").forEach((b) => b.addEventListener("click", () => setTool(b.dataset.tool)));
         view.querySelectorAll("[data-stroke]").forEach((b) => b.addEventListener("click", () => setStroke(Number(b.dataset.stroke))));
+        view.querySelectorAll("[data-count]").forEach((b) => b.addEventListener("click", () => setCount(Number(b.dataset.count))));
         q(".ps-pg-pick").addEventListener("click", () => {
             const s = selected();
             if (s && s.type === "rect") openPicker(s);
@@ -308,25 +316,113 @@
         if (switchPage(dir)) wheelUntil = now + WHEEL_PAUSE;
     }
 
-    // dir は 1（次）か -1（前）。移れたら true。元に戻すの履歴はページごとなので、移ったら空にする
-    function switchPage(dir) {
-        const next = ed.opts.neighbor && ed.opts.neighbor(ed.page, dir);
-        if (!next) return false;
+    // ---------- 並べて表示（1〜3 枚） ----------
+    // Book のコマページのうち start から count 枚を、右から Book の順に並べる（漫画の見開きと同じ向き）。
+    // 編集するのはそのうちの 1 枚（ed.page）だけで、ほかのページは絵だけを出し、クリックするとそのページを編集する
+
+    const pageList = () => (ed.opts.pages ? ed.opts.pages() : [ed.page]);
+    const shownCount = (list) => Math.max(1, Math.min(prefs.count, list.length));
+
+    // 編集中のページが並びに入るように start を直す
+    function fitWindow(list) {
+        const n = shownCount(list);
+        const i = Math.max(0, list.indexOf(ed.page));
+        ed.start = clamp(ed.start || 0, i - n + 1, i);
+        ed.start = clamp(ed.start, 0, Math.max(0, list.length - n));
+    }
+
+    // 並べたページの枠を作り直す。編集中のページの枠には編集用の svg を入れる。図形の編集では呼ばない（render だけ）
+    function renderSlots() {
+        const stage = q(".ps-pg-stage");
+        const list = pageList();
+        fitWindow(list);
+        const n = shownCount(list);
+        stage.classList.toggle("ps-pg-multi", n > 1);
+        stage.textContent = "";
+        // 2 枚以上では、ページ番号のすぐ下にそろえて置く
+        const align = n > 1 ? "xMidYMin meet" : "xMidYMid meet";
+        svg.setAttribute("preserveAspectRatio", align);
+        const width = Math.max(3, String(list.length).length);
+        for (let i = ed.start; i < ed.start + n; i++) {
+            const page = list[i];
+            const active = page === ed.page;
+            const slot = el("div", {class: "ps-pg-slot" + (active ? " ps-pg-slot-active" : "")});
+            if (n > 1) {
+                slot.appendChild(el("span", {class: "ps-pg-slot-no", text: String(i + 1).padStart(width, "0") + (active ? "  編集中" : "")}));
+            }
+            if (active) {
+                slot.appendChild(svg);
+            } else {
+                const margin = Math.max(page.width, page.height) * 0.02;
+                const peek = svgEl("svg", {class: "ps-pg-svg ps-pg-peek", viewBox: `${-margin} ${-margin} ${page.width + margin * 2} ${page.height + margin * 2}`, preserveAspectRatio: align});
+                const g = svgEl("g");
+                drawPage(g, page, (ref) => ed.opts.resolve(ref, true), true);
+                peek.appendChild(g);
+                slot.title = "クリックでこのページを編集";
+                slot.addEventListener("click", () => activatePage(page));
+                slot.appendChild(peek);
+            }
+            stage.appendChild(slot);
+        }
+    }
+
+    // 編集するページを変える。元に戻すの履歴はページごとなので、変えたら空にする
+    function setActivePage(page) {
+        if (page === ed.page) return;
         if (drag) cancelDrag();
-        ed.page = next;
+        ed.page = page;
         ed.sel = null;
         ed.undo = [];
         ed.redo = [];
+    }
+
+    function activatePage(page) {
+        setActivePage(page);
+        renderSlots();
+        render();
+        refocus();
+    }
+
+    // dir は 1（次）か -1（前）。動けたら true。
+    // 1 枚表示では前後のページへ移る。2 枚以上では並びを 1 枚ずらし、はみ出した編集中のページは入ってきた側の隣のページに替える。
+    // 並びが端まで来てずらせないときは、編集するページを並びの中で 1 つ進める
+    function switchPage(dir) {
+        const list = pageList();
+        const n = shownCount(list);
+        const i = list.indexOf(ed.page);
+        const start = ed.start + dir;
+        if (n > 1 && start >= 0 && start <= list.length - n) {
+            ed.start = start;
+            if (i < start) setActivePage(list[start]);
+            else if (i > start + n - 1) setActivePage(list[start + n - 1]);
+        } else {
+            const next = list[i + dir];
+            if (!next) return false;
+            setActivePage(next);
+        }
+        renderSlots();
         render();
         return true;
     }
 
+    function setCount(n) {
+        if (!PAGE_COUNTS.includes(n) || n === prefs.count) return;
+        prefs.count = n;
+        savePrefs();
+        renderSlots();
+        render();
+        refocus();
+    }
+
     function open(opts) {
         if (!view) build(opts.host);
-        ed = {page: opts.page, opts, sel: null, undo: [], redo: []};
+        ed = {page: opts.page, opts, sel: null, undo: [], redo: [], start: 0};
+        // 開いたページを右端（並びの最初）に置く。後ろに足りなければ左に寄せる
+        ed.start = Math.max(0, pageList().indexOf(opts.page));
         drag = null;
         q(".ps-pg-crop").classList.add("ps-off");
         view.classList.remove("ps-off");
+        renderSlots();
         render();
     }
 
@@ -478,6 +574,7 @@
         q(".ps-pg-hint").textContent = HINTS[prefs.tool];
         q(".ps-pg-stage").dataset.tool = prefs.tool;
         q(".ps-pg-where").textContent = ed.opts.title(ed.page);
+        view.querySelectorAll("[data-count]").forEach((b) => b.classList.toggle("mtm-active", Number(b.dataset.count) === prefs.count));
         // 押したボタンが使えなくなったり隠れたりしてフォーカスが外れたら戻す
         if (!document.activeElement || document.activeElement === document.body) refocus();
     }
