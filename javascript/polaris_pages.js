@@ -171,7 +171,7 @@
             <div class="mtm-fs-bar">
                 <button type="button" class="mtm-btn ps-pg-back">← Book</button>
                 <span class="mtm-fs-title">コマページ</span>
-                <span class="mtm-fs-target ps-pg-where"></span>
+                <span class="mtm-fs-target ps-pg-where" title="キャンバスの上でホイールを回すか PageUp・PageDown で、Book の前後のコマページに移ります"></span>
                 <span class="mtm-fs-spacer"></span>
                 <button type="button" class="mtm-btn ps-pg-undo" title="元に戻す (Ctrl+Z)">↶ 元に戻す</button>
                 <button type="button" class="mtm-btn ps-pg-redo" title="やり直す (Ctrl+Y)">↷ やり直す</button>
@@ -271,7 +271,54 @@
         new ResizeObserver(() => {
             if (ed) render();
         }).observe(q(".ps-pg-stage"));
+        // ホイールで Book の前後のコマページへ移る（下・右へ回すと次）。Ctrl を押しているときはブラウザの拡大に任せる
+        q(".ps-pg-stage").addEventListener("wheel", (e) => {
+            if (!ed || e.ctrlKey) return;
+            e.preventDefault();
+            wheelPage(e);
+        }, {passive: false});
         buildCrop();
+    }
+
+    // ---------- 前後のコマページへの移動 ----------
+    // トラックパッドなどで細かいホイールが続けて来ても 1 ページずつ進むよう、量をためてから移り、移ったあとは少し待つ
+
+    const WHEEL_STEP = 60;          // この量（ピクセル）たまったら 1 ページ移る
+    const WHEEL_PAUSE = 350;        // 移ったあと、この時間（ミリ秒）はホイールを受け付けない
+    let wheelSum = 0;
+    let wheelUntil = 0;
+    let wheelReset = null;
+
+    function wheelPage(e) {
+        if (drag || isCropOpen()) return;
+        const now = Date.now();
+        if (now < wheelUntil) return;
+        // 行単位・ページ単位のホイールもピクセルにならす
+        const scale = e.deltaMode === 1 ? 40 : e.deltaMode === 2 ? 800 : 1;
+        const delta = (Math.abs(e.deltaY) >= Math.abs(e.deltaX) ? e.deltaY : e.deltaX) * scale;
+        if (!delta) return;
+        // 向きが変わったら、ためた量を捨てる
+        if (Math.sign(delta) !== Math.sign(wheelSum)) wheelSum = 0;
+        wheelSum += delta;
+        clearTimeout(wheelReset);
+        wheelReset = setTimeout(() => (wheelSum = 0), 200);
+        if (Math.abs(wheelSum) < WHEEL_STEP) return;
+        const dir = wheelSum > 0 ? 1 : -1;
+        wheelSum = 0;
+        if (switchPage(dir)) wheelUntil = now + WHEEL_PAUSE;
+    }
+
+    // dir は 1（次）か -1（前）。移れたら true。元に戻すの履歴はページごとなので、移ったら空にする
+    function switchPage(dir) {
+        const next = ed.opts.neighbor && ed.opts.neighbor(ed.page, dir);
+        if (!next) return false;
+        if (drag) cancelDrag();
+        ed.page = next;
+        ed.sel = null;
+        ed.undo = [];
+        ed.redo = [];
+        render();
+        return true;
     }
 
     function open(opts) {
@@ -430,7 +477,7 @@
         if (document.activeElement !== q(".ps-pg-h")) q(".ps-pg-h").value = ed.page.height;
         q(".ps-pg-hint").textContent = HINTS[prefs.tool];
         q(".ps-pg-stage").dataset.tool = prefs.tool;
-        q(".ps-pg-where").textContent = ed.opts.title();
+        q(".ps-pg-where").textContent = ed.opts.title(ed.page);
         // 押したボタンが使えなくなったり隠れたりしてフォーカスが外れたら戻す
         if (!document.activeElement || document.activeElement === document.body) refocus();
     }
@@ -768,6 +815,10 @@
             redo();
         } else if (ctrl || e.altKey) {
             return;
+        } else if (e.key === "PageDown" || e.key === "PageUp") {
+            // ホイールと同じく、前後のコマページへ
+            stop();
+            if (!drag) switchPage(e.key === "PageDown" ? 1 : -1);
         } else if (e.key === "Delete" || e.key === "Backspace") {
             stop();
             deleteSelected();

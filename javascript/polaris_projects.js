@@ -1727,7 +1727,9 @@
         window.PolarisPages.open({
             host: overlay,
             page,
-            title: () => `${book.title}  ${book.items.indexOf(page) + 1} / ${book.items.length}`,
+            title: (pg) => `${book.title}  ${book.items.indexOf(pg) + 1} / ${book.items.length}`,
+            // ホイールで移る前後のコマページ（dir は 1 か -1）。端では null
+            neighbor: (pg, dir) => pageItems(book)[pageItems(book).indexOf(pg) + dir] || null,
             // はめ込む画像は、カット案を選んでから、そのカット案の画像（古い順）から選ぶ。
             // panels はこの Book のコマで使っているページの名前（カット案ではその画像のどれかを使っているページ）
             cuts: () => project.scenes.flatMap((scene) => scene.cuts.map((cut) => {
