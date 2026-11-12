@@ -1730,6 +1730,9 @@
             title: (pg) => `${book.title}  ${book.items.indexOf(pg) + 1} / ${book.items.length}`,
             // 並べて表示したり、ホイールで移ったりするコマページ（Book の順）
             pages: () => pageItems(book),
+            // 上部バーの真ん中の「プロジェクトへ戻る」。編集画面を閉じたあとに呼ばれ、Book の画面も閉じる
+            projectTitle: () => project.title,
+            onProject: () => closeBooks(),
             // はめ込む画像は、カット案を選んでから、そのカット案の画像（古い順）から選ぶ。
             // panels はこの Book のコマで使っているページの名前（カット案ではその画像のどれかを使っているページ）
             cuts: () => project.scenes.flatMap((scene) => scene.cuts.map((cut) => {

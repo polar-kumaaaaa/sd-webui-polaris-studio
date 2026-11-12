@@ -2341,6 +2341,41 @@ body.mtm-fs-open {
     z-index: 12;
 }
 
+/* 上部バーは左・真ん中・右の 3 つに分け、「プロジェクトへ戻る」を真ん中に置く */
+.ps-page-view > .mtm-fs-bar.ps-pg-bar {
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
+    align-items: center;
+    gap: 12px;
+}
+
+.ps-pg-bar-side {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+}
+
+.ps-pg-bar-right {
+    justify-content: flex-end;
+}
+
+#mtm-fs .ps-pg-project {
+    max-width: 32vw;
+    overflow: hidden;
+    color: var(--color-accent);
+    font-size: 13px;
+    font-weight: 600;
+    text-decoration: none;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+#mtm-fs .ps-pg-project:hover {
+    text-decoration: underline;
+}
+
 .ps-pg-tools {
     flex: none;
     display: flex;

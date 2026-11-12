@@ -171,17 +171,21 @@
         loadPrefs();
         view = el("div", {class: "mtm-fs-window ps-page-view ps-off"});
         view.innerHTML = `
-            <div class="mtm-fs-bar">
-                <button type="button" class="mtm-btn ps-pg-back">← Book</button>
-                <span class="mtm-fs-title">コマページ</span>
-                <span class="mtm-fs-target ps-pg-where" title="キャンバスの上でホイールを回すか PageUp・PageDown で、Book の前後のコマページに移ります"></span>
-                <span class="ps-pg-group ps-pg-counts" title="並べて表示するコマページの枚数。右から Book の順に並びます（漫画の見開きと同じ）。編集するのは枠の付いたページで、ほかのページはクリックすると編集できます">
-                    <span class="ps-pg-label">表示</span>
-                    ${PAGE_COUNTS.map((n) => `<button type="button" class="mtm-btn" data-count="${n}">${n} 枚</button>`).join("")}
-                </span>
-                <span class="mtm-fs-spacer"></span>
-                <button type="button" class="mtm-btn ps-pg-undo" title="元に戻す (Ctrl+Z)">↶ 元に戻す</button>
-                <button type="button" class="mtm-btn ps-pg-redo" title="やり直す (Ctrl+Y)">↷ やり直す</button>
+            <div class="mtm-fs-bar ps-pg-bar">
+                <div class="ps-pg-bar-side">
+                    <button type="button" class="mtm-btn ps-pg-back">← Book</button>
+                    <span class="mtm-fs-title">コマページ</span>
+                    <span class="mtm-fs-target ps-pg-where" title="キャンバスの上でホイールを回すか PageUp・PageDown で、Book の前後のコマページに移ります"></span>
+                    <span class="ps-pg-group ps-pg-counts" title="並べて表示するコマページの枚数。右から Book の順に並びます（漫画の見開きと同じ）。編集するのは枠の付いたページで、ほかのページはクリックすると編集できます">
+                        <span class="ps-pg-label">表示</span>
+                        ${PAGE_COUNTS.map((n) => `<button type="button" class="mtm-btn" data-count="${n}">${n} 枚</button>`).join("")}
+                    </span>
+                </div>
+                <a href="#" class="ps-pg-project" title="コマページと Book の画面を閉じて、プロジェクトの画面に戻ります（編集した内容は保存済みです）"></a>
+                <div class="ps-pg-bar-side ps-pg-bar-right">
+                    <button type="button" class="mtm-btn ps-pg-undo" title="元に戻す (Ctrl+Z)">↶ 元に戻す</button>
+                    <button type="button" class="mtm-btn ps-pg-redo" title="やり直す (Ctrl+Y)">↷ やり直す</button>
+                </div>
             </div>
             <div class="ps-pg-tools">
                 <div class="ps-pg-group">
@@ -245,6 +249,14 @@
         q(".ps-pg-stage").appendChild(svg);
 
         q(".ps-pg-back").addEventListener("click", close);
+        // 個別プロジェクトの画面へ戻る。Book の画面も飛ばして戻る（変更は図形を触るたびに保存している）
+        q(".ps-pg-project").addEventListener("click", (e) => {
+            e.preventDefault();
+            if (!ed) return;
+            const toProject = ed.opts.onProject;
+            close();
+            if (toProject) toProject();
+        });
         q(".ps-pg-undo").addEventListener("click", undo);
         q(".ps-pg-redo").addEventListener("click", redo);
         view.querySelectorAll("[data-tool]").forEach((b) => b.addEventListener("click", () => setTool(b.dataset.tool)));
@@ -575,6 +587,9 @@
         q(".ps-pg-hint").textContent = HINTS[prefs.tool];
         q(".ps-pg-stage").dataset.tool = prefs.tool;
         q(".ps-pg-where").textContent = ed.opts.title(ed.page);
+        const project = q(".ps-pg-project");
+        project.textContent = `← プロジェクト「${ed.opts.projectTitle ? ed.opts.projectTitle() : ""}」へ戻る`;
+        project.classList.toggle("ps-off", !ed.opts.onProject);
         view.querySelectorAll("[data-count]").forEach((b) => b.classList.toggle("mtm-active", Number(b.dataset.count) === prefs.count));
         // 押したボタンが使えなくなったり隠れたりしてフォーカスが外れたら戻す
         if (!document.activeElement || document.activeElement === document.body) refocus();
