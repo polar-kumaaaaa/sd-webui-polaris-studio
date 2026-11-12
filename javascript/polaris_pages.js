@@ -384,17 +384,18 @@
     }
 
     // dir は 1（次）か -1（前）。動けたら true。
-    // 1 枚表示では前後のページへ移る。2 枚以上では並びを 1 枚ずらし、はみ出した編集中のページは入ってきた側の隣のページに替える。
-    // 並びが端まで来てずらせないときは、編集するページを並びの中で 1 つ進める
+    // 1 枚表示では前後のページへ移る。2 枚以上では並びを 1 枚ずらし、編集するページは並びの中の同じ位置のページにする
+    // （3 枚表示で真ん中を編集していたら、ずらしたあとも真ん中）。
+    // 並びが端まで来てずらせないときは、編集するページを並びの中で 1 つ進める（端のページまで行けるように）
     function switchPage(dir) {
         const list = pageList();
         const n = shownCount(list);
         const i = list.indexOf(ed.page);
         const start = ed.start + dir;
         if (n > 1 && start >= 0 && start <= list.length - n) {
+            const offset = i - ed.start;
             ed.start = start;
-            if (i < start) setActivePage(list[start]);
-            else if (i > start + n - 1) setActivePage(list[start + n - 1]);
+            setActivePage(list[start + offset]);
         } else {
             const next = list[i + dir];
             if (!next) return false;
