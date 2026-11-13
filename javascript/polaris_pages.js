@@ -92,6 +92,15 @@
     const TEXT_LINE = [1, 4];
     const TEXT_SPACING = [-0.5, 2];
     const OUTLINES = [0, 2, 4, 6, 8, 12, 16, 24];
+    // フォント選びの絞り込み [キー, 表示, 説明]
+    const FONT_FILTERS = [
+        ["all", "すべて", "この PC のすべてのフォント"],
+        ["added", "追加したフォント", "Windows の個人用のフォント（右クリック →「インストール」で入れたフォント）と、拡張フォルダの data/fonts/ のフォント。「すべてのユーザーに対してインストール」で入れたフォントは、Windows に最初からあるフォントと見分けられないので出ません（★ を付けてください）"],
+        ["fav", "★ お気に入り", "★ を付けたフォント"],
+        ["recent", "最近使った", "最近セリフに使ったフォント（新しい順）"],
+    ];
+    const FONT_RECENT_MAX = 12;
+    const FONT_FAV_MAX = 1000;
     // 新しく置くセリフに使うフォント（一覧にあれば、この順に選ぶ）
     const FONT_PREFERRED = ["win:YuGothB.ttc#0", "win:YuGothM.ttc#0", "win:meiryo.ttc#0", "win:msgothic.ttc#0"];
 
@@ -309,7 +318,9 @@
     // favOnly は画像選択の「お気に入りのみ」
     // count は編集画面に並べるコマページの枚数（1〜3）
     // text はこれから置くセリフの書式（最後に使った書式）
-    const prefs = {tool: "rect", line: 4, rect: 4, cropMode: "cover", favOnly: false, count: 1, text: {...TEXT_DEFAULT}};
+    // fontFavorites は ★ を付けたフォント、fontRecent は最近使ったフォント（新しい順）、fontFilter はフォント選びの絞り込み
+    const prefs = {tool: "rect", line: 4, rect: 4, cropMode: "cover", favOnly: false, count: 1, text: {...TEXT_DEFAULT},
+        fontFavorites: [], fontRecent: [], fontFilter: "all"};
     const PAGE_COUNTS = [1, 2, 3];
 
     const q = (sel) => view.querySelector(sel);
@@ -327,6 +338,10 @@
             const saved = JSON.parse(localStorage.getItem(PREFS_KEY) || "{}");
             if (["select", "line", "rect", "text"].includes(saved.tool)) prefs.tool = saved.tool;
             if (saved.text && typeof saved.text === "object") prefs.text = cleanTextStyle(saved.text);
+            const ids = (v, max) => (Array.isArray(v) ? [...new Set(v.filter((x) => typeof x === "string" && x))].slice(0, max) : []);
+            prefs.fontFavorites = ids(saved.fontFavorites, FONT_FAV_MAX);
+            prefs.fontRecent = ids(saved.fontRecent, FONT_RECENT_MAX);
+            if (FONT_FILTERS.some(([key]) => key === saved.fontFilter)) prefs.fontFilter = saved.fontFilter;
             if (STROKES.includes(saved.line) && saved.line) prefs.line = saved.line;
             if (STROKES.includes(saved.rect)) prefs.rect = saved.rect;
             if (saved.cropMode === "full") prefs.cropMode = "full";
@@ -390,7 +405,7 @@
             </div>
             <div class="ps-pg-tools ps-pg-textbar ps-off" title="選んだセリフ（なければ、これから置くセリフ）の書式">
                 <span class="ps-pg-label">セリフ</span>
-                <select class="ps-pg-font" title="フォント。この PC に入っているフォントを使えます（書き出しにも同じ字形で入ります）"></select>
+                <button type="button" class="mtm-btn ps-pg-font" title="フォントを選びます。この PC に入っているフォントを使えます（書き出しにも同じ字形で入ります）"></button>
                 <label class="ps-pg-size">大きさ <input type="number" class="ps-pg-tsize" min="${TEXT_SIZE[0]}" max="${TEXT_SIZE[1]}" step="1" title="文字の大きさ（ページのピクセル）"></label>
                 <span class="ps-pg-group">
                     <button type="button" class="mtm-btn" data-dir="v" title="縦書き">縦書き</button>
@@ -403,6 +418,17 @@
                     <select class="ps-pg-toutline" title="文字のフチの太さ（ピクセル）。絵の上に直接置く文字に">${OUTLINES.map((w) => `<option value="${w}">${w ? w + " px" : "なし"}</option>`).join("")}</select>
                     <input type="color" class="ps-pg-toutcolor" title="フチの色">
                 </label>
+            </div>
+            <div class="ps-pg-fontpicker ps-off">
+                <div class="ps-pg-fontpicker-head">
+                    <input type="search" class="ps-pg-fontsearch" placeholder="フォントの名前で検索（Enter で一番上を選ぶ）">
+                    <button type="button" class="mtm-icon ps-pg-fontpicker-close" title="閉じる (Esc)">✕</button>
+                </div>
+                <div class="ps-pg-group ps-pg-fontfilters">
+                    ${FONT_FILTERS.map(([key, label, title]) => `<button type="button" class="mtm-btn" data-font-filter="${key}" title="${title}">${label}</button>`).join("")}
+                    <span class="ps-pg-fontcount"></span>
+                </div>
+                <div class="ps-pg-fontlist"></div>
             </div>
             <div class="ps-pg-hint"></div>
             <div class="ps-pg-textedit ps-off">
@@ -546,13 +572,154 @@
             prefs.text.font = FONT_PREFERRED.find((id) => ids.has(id)) || (fontList[0] ? fontList[0].id : "");
             savePrefs();
         }
-        const select = q(".ps-pg-font");
-        select.textContent = "";
-        for (const f of fontList) {
-            const style = f.style && !/^(regular|normal|標準)$/i.test(f.style) ? " " + f.style : "";
-            select.appendChild(el("option", {value: f.id, text: f.name + style}));
-        }
         if (ed) updateTools();
+        if (isFontPickerOpen()) renderFontList();
+    }
+
+    // ---------- フォント選び ----------
+    // 名前の検索と、すべて・追加したフォント・★ お気に入り・最近使った の絞り込み。それぞれのフォントで描いた見本を出す
+    // （見本はサーバーが作る画像で、一覧で見えている分だけ読み込む）
+
+    const fontOf = (id) => (fontList || []).find((f) => f.id === id) || null;
+    const isFontPickerOpen = () => view && !q(".ps-pg-fontpicker").classList.contains("ps-off");
+
+    function fontLabel(f) {
+        const style = f.style && !/^(regular|normal|標準)$/i.test(f.style) ? " " + f.style : "";
+        return f.name + style;
+    }
+
+    function fontName(id) {
+        if (!fontList) return "フォントを読み込み中…";
+        const f = fontOf(id);
+        return f ? fontLabel(f) : id ? "（見つからないフォント）" : "（既定のフォント）";
+    }
+
+    function buildFontPicker() {
+        const picker = q(".ps-pg-fontpicker");
+        q(".ps-pg-font").addEventListener("click", () => (isFontPickerOpen() ? closeFontPicker() : openFontPicker()));
+        q(".ps-pg-fontpicker-close").addEventListener("click", closeFontPicker);
+        q(".ps-pg-fontsearch").addEventListener("input", renderFontList);
+        q(".ps-pg-fontsearch").addEventListener("keydown", (e) => {
+            if (e.key !== "Enter" || e.isComposing) return;
+            e.preventDefault();
+            const first = q(".ps-pg-fontlist [data-font]");
+            if (first) pickFont(first.dataset.font);
+        });
+        view.querySelectorAll("[data-font-filter]").forEach((b) => b.addEventListener("click", () => {
+            prefs.fontFilter = b.dataset.fontFilter;
+            savePrefs();
+            renderFontList();
+            q(".ps-pg-fontsearch").focus();
+        }));
+        // 外を押したら閉じる
+        view.addEventListener("mousedown", (e) => {
+            if (isFontPickerOpen() && !picker.contains(e.target) && !e.target.closest(".ps-pg-font")) closeFontPicker();
+        }, true);
+    }
+
+    function openFontPicker() {
+        loadFonts();
+        const picker = q(".ps-pg-fontpicker");
+        const r = q(".ps-pg-font").getBoundingClientRect();
+        picker.classList.remove("ps-off");
+        // ボタンの下に出す。画面の右や下からはみ出すときは寄せる
+        const w = picker.offsetWidth, h = picker.offsetHeight;
+        picker.style.left = Math.max(8, Math.min(r.left, window.innerWidth - w - 8)) + "px";
+        picker.style.top = Math.max(8, Math.min(r.bottom + 4, window.innerHeight - h - 8)) + "px";
+        renderFontList();
+        const search = q(".ps-pg-fontsearch");
+        search.focus();
+        search.select();
+    }
+
+    function closeFontPicker() {
+        if (!view || !isFontPickerOpen()) return;
+        q(".ps-pg-fontpicker").classList.add("ps-off");
+        if (textEdit) q(".ps-pg-textarea").focus();
+        else refocus();
+    }
+
+    // いま書式を見ているセリフ（選んでいるセリフ、なければこれから置くセリフ）のフォント
+    function currentFont() {
+        const s = ed && selected();
+        return s && s.type === "text" ? s.font : prefs.text.font;
+    }
+
+    function renderFontList() {
+        const box = q(".ps-pg-fontlist");
+        const filter = prefs.fontFilter;
+        view.querySelectorAll("[data-font-filter]").forEach((b) => b.classList.toggle("mtm-active", b.dataset.fontFilter === filter));
+        box.textContent = "";
+        if (!fontList) {
+            q(".ps-pg-fontcount").textContent = "";
+            box.appendChild(el("div", {class: "mtm-empty", text: "フォントを読み込み中…"}));
+            return;
+        }
+        const favs = new Set(prefs.fontFavorites);
+        let list = fontList;
+        if (filter === "added") list = list.filter((f) => f.added);
+        else if (filter === "fav") list = list.filter((f) => favs.has(f.id));
+        else if (filter === "recent") list = prefs.fontRecent.map(fontOf).filter(Boolean);
+        const words = q(".ps-pg-fontsearch").value.trim().toLowerCase().split(/\s+/).filter(Boolean);
+        if (words.length) {
+            list = list.filter((f) => {
+                const hay = `${f.name} ${f.style} ${f.id}`.toLowerCase();
+                return words.every((w) => hay.includes(w));
+            });
+        }
+        q(".ps-pg-fontcount").textContent = `${list.length} 個`;
+        if (!list.length) {
+            const empty = words.length ? "名前に合うフォントがありません。"
+                : {
+                    added: "追加したフォントがありません。フォントのファイルを右クリック →「インストール」で入れるか、拡張フォルダの data/fonts/ に置くと出ます（reForge の再起動が必要です）。",
+                    fav: "★ を付けたフォントがありません。一覧の ☆ を押すと付けられます。",
+                    recent: "まだセリフにフォントを使っていません。",
+                }[filter] || "フォントが見つかりません。";
+            box.appendChild(el("div", {class: "mtm-empty", text: empty}));
+            return;
+        }
+        const current = currentFont();
+        let focus = null;
+        for (const f of list) {
+            const fav = favs.has(f.id);
+            const row = el("div", {class: "ps-pg-fontrow" + (f.id === current ? " ps-on" : "")}, [
+                el("button", {
+                    type: "button", class: "mtm-icon ps-pg-fontstar" + (fav ? " ps-on" : ""), text: fav ? "★" : "☆",
+                    title: fav ? "★ を外す" : "★ お気に入りにする", onclick: () => toggleFontFavorite(f.id),
+                }),
+                el("button", {type: "button", class: "ps-pg-fontpick", "data-font": f.id, title: f.id, onclick: () => pickFont(f.id)}, [
+                    el("span", {class: "ps-pg-fontname", text: fontLabel(f)}, f.added ? [el("span", {class: "ps-pg-fontadded", text: "追加", title: "自分で追加したフォント"})] : []),
+                    // 読めないフォントは見本を出さない
+                    el("img", {class: "ps-pg-fontsample", src: "polaris-studio/font-sample?" + new URLSearchParams({id: f.id}), alt: "", loading: "lazy", draggable: "false",
+                        onerror: (e) => e.target.remove()}),
+                ]),
+            ]);
+            if (f.id === current) focus = row;
+            box.appendChild(row);
+        }
+        if (focus) focus.scrollIntoView({block: "nearest"});
+    }
+
+    function toggleFontFavorite(id) {
+        const list = prefs.fontFavorites.filter((x) => x !== id);
+        if (list.length === prefs.fontFavorites.length) list.unshift(id);
+        prefs.fontFavorites = list.slice(0, FONT_FAV_MAX);
+        savePrefs();
+        const scroll = q(".ps-pg-fontlist").scrollTop;
+        renderFontList();
+        q(".ps-pg-fontlist").scrollTop = scroll;
+    }
+
+    function useFont(id) {
+        if (!id) return;
+        prefs.fontRecent = [id, ...prefs.fontRecent.filter((x) => x !== id)].slice(0, FONT_RECENT_MAX);
+        savePrefs();
+    }
+
+    function pickFont(id) {
+        useFont(id);
+        closeFontPicker();
+        setTextStyle("font", id);
     }
 
     function buildText() {
@@ -577,7 +744,7 @@
         num(".ps-pg-tsize", "size", TEXT_SIZE);
         num(".ps-pg-tline", "lineHeight", TEXT_LINE);
         num(".ps-pg-tspace", "spacing", TEXT_SPACING);
-        q(".ps-pg-font").addEventListener("change", (e) => setTextStyle("font", e.target.value));
+        buildFontPicker();
         q(".ps-pg-toutline").addEventListener("change", (e) => setTextStyle("outline", Number(e.target.value)));
         q(".ps-pg-tcolor").addEventListener("change", (e) => setTextStyle("color", e.target.value.toLowerCase()));
         q(".ps-pg-toutcolor").addEventListener("change", (e) => setTextStyle("outlineColor", e.target.value.toLowerCase()));
@@ -618,16 +785,10 @@
             const input = q(sel);
             if (document.activeElement !== input) input.value = v;
         };
-        const select = q(".ps-pg-font");
-        // 一覧にないフォント（ほかの PC で選んだものなど）も、選ばれていることが分かるように出す
-        if (fontList && t.font && ![...select.options].some((o) => o.value === t.font)) {
-            select.appendChild(el("option", {value: t.font, text: `（見つからないフォント ${t.font}）`}));
-        }
-        if (!fontList) {
-            select.textContent = "";
-            select.appendChild(el("option", {value: "", text: "フォントを読み込み中…"}));
-        }
-        set(".ps-pg-font", t.font);
+        // 一覧にないフォント（ほかの PC で選んだものなど）は「見つからないフォント」と出す
+        const button = q(".ps-pg-font");
+        button.textContent = fontName(t.font) + " ▾";
+        button.title = `フォントを選びます（${t.font || "既定"}）。書き出しにも同じ字形で入ります`;
         set(".ps-pg-tsize", t.size);
         set(".ps-pg-tline", t.lineHeight);
         set(".ps-pg-tspace", t.spacing);
@@ -644,6 +805,7 @@
         fitText(s);
         ed.page.shapes.push(s);
         ed.sel = s.id;
+        useFont(s.font);
         startTextEdit(s, before);
     }
 
@@ -927,6 +1089,7 @@
     function close() {
         if (!ed) return;
         const opts = ed.opts;
+        closeFontPicker();
         finishTextEdit(true);
         if (drag) cancelDrag();
         closeCrop();
@@ -1456,6 +1619,14 @@
             e.preventDefault();
             e.stopPropagation();
         };
+        // フォント選びを開いている間は、Esc で閉じるほかは検索欄に任せる
+        if (isFontPickerOpen()) {
+            if (e.key === "Escape") {
+                stop();
+                closeFontPicker();
+            }
+            return;
+        }
         // セリフの入力中は、Esc（取り消し）と Ctrl+Enter（決定）のほかは入力欄に任せる
         if (textEdit) {
             if (e.key === "Escape") {

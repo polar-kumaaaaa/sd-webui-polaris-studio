@@ -609,7 +609,16 @@ FONT_ID = r"[a-z]{1,8}:[^#\x00]{1,300}#\d{1,2}"
 FONT_EXTENSIONS = (".ttf", ".otf", ".ttc", ".otc")
 FONT_FALLBACKS = ("win:YuGothM.ttc#0", "win:meiryo.ttc#0", "win:msgothic.ttc#0")
 
-_font_list = None       # [{id, name, style}]
+# 自分で入れたフォントの置き場所（Windows の個人用のフォント、data/fonts/、Linux・macOS のホームのフォント）。
+# Windows の「すべてのユーザーに対してインストール」は Windows\Fonts に入り、最初からあるフォントと見分けられない
+FONT_ADDED_ROOTS = ("user", "ext", "home", "machome")
+FONT_SAMPLE = "あいうアイウ漢字 Abc"
+FONT_SAMPLE_SIZE = 26
+FONT_SAMPLE_HEIGHT = 38
+FONT_SAMPLE_WIDTH = 360
+
+_font_list = None       # [{id, name, style, added}]
+_sample_cache = {}      # フォントの id → 見本の PNG
 _font_cache = {}        # (パス, 番号, 大きさ) → ImageFont
 _face_cache = {}        # (パス, 番号) → TTC から取り出した 1 フェイスのバイト列（ブラウザ用）
 
@@ -702,7 +711,7 @@ def list_fonts(refresh=False):
                 path = os.path.join(folder, file)
                 rel = os.path.relpath(path, root).replace(os.sep, "/")
                 for index, family, style in _font_faces(path):
-                    fonts.append({"id": f"{key}:{rel}#{index}", "name": family, "style": style})
+                    fonts.append({"id": f"{key}:{rel}#{index}", "name": family, "style": style, "added": key in FONT_ADDED_ROOTS})
     # 日本語の名前のフォントを先に、名前の順に
     cjk = re.compile(r"[\u3040-\u30ff\u3400-\u9fff]")
     fonts.sort(key=lambda f: (not cjk.search(f["name"]), f["name"].lower(), f["style"].lower()))
@@ -727,6 +736,23 @@ def load_font(font_id, size):
                 continue
         return _font_cache[key]
     return ImageFont.load_default(size)
+
+
+# フォント選びの一覧に出す見本（黒い字、透明な地の PNG）。字のないフォントは豆腐（□）になる
+def font_sample(font_id):
+    if font_id in _sample_cache:
+        return _sample_cache[font_id]
+    path, index = font_path(font_id)
+    font = ImageFont.truetype(path, FONT_SAMPLE_SIZE, index=index)
+    width = min(int(font.getlength(FONT_SAMPLE)) + 8, FONT_SAMPLE_WIDTH)
+    image = Image.new("RGBA", (max(width, 8), FONT_SAMPLE_HEIGHT), (0, 0, 0, 0))
+    ImageDraw.Draw(image).text((4, FONT_SAMPLE_HEIGHT / 2), FONT_SAMPLE, font=font, fill=(0, 0, 0, 255), anchor="lm")
+    out = io.BytesIO()
+    image.save(out, "PNG")
+    if len(_sample_cache) > 2000:
+        _sample_cache.clear()
+    _sample_cache[font_id] = out.getvalue()
+    return _sample_cache[font_id]
 
 
 # ブラウザに渡すフォント。TTC はブラウザでフェイスを選べないので、fontTools で 1 フェイスだけのファイルにする
@@ -1165,6 +1191,15 @@ def on_app_started(demo, app):
             return {"ok": True, "fonts": list_fonts(refresh)}
         except Exception as e:
             return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+    # フォント選びの見本
+    @app.get("/polaris-studio/font-sample")
+    def get_font_sample(id: str):
+        try:
+            data = font_sample(id)
+        except Exception as e:
+            return JSONResponse({"ok": False, "error": str(e)}, status_code=404)
+        return Response(data, media_type="image/png", headers={"Cache-Control": "max-age=86400"})
 
     # 編集画面で同じ字形を出すためのフォントのファイル
     @app.get("/polaris-studio/font")

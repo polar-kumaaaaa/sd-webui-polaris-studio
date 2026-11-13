@@ -2455,7 +2455,116 @@ body.mtm-fs-open {
 }
 
 #mtm-fs .ps-pg-font {
-    max-width: 240px;
+    max-width: 260px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* フォント選び。ボタンの下に浮かべる */
+.ps-pg-fontpicker {
+    position: fixed;
+    z-index: 30;
+    width: min(460px, calc(100vw - 16px));
+    height: min(560px, calc(100vh - 16px));
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 10px;
+    box-sizing: border-box;
+    border: 1px solid var(--border-color-primary);
+    border-radius: 8px;
+    background: var(--background-fill-primary);
+    box-shadow: 0 8px 28px rgba(0, 0, 0, 0.35);
+}
+
+.ps-pg-fontpicker-head {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+#mtm-fs .ps-pg-fontsearch {
+    flex: 1;
+    padding: 4px 8px;
+}
+
+.ps-pg-fontfilters {
+    flex-wrap: wrap;
+}
+
+.ps-pg-fontcount {
+    margin-left: auto;
+    font-size: 12px;
+    color: var(--body-text-color-subdued);
+}
+
+.ps-pg-fontlist {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    border-top: 1px solid var(--border-color-primary);
+}
+
+.ps-pg-fontrow {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    border-bottom: 1px solid var(--border-color-primary);
+}
+
+.ps-pg-fontrow.ps-on {
+    background: var(--color-accent-soft);
+}
+
+#mtm-fs .ps-pg-fontstar {
+    flex: none;
+    font-size: 16px;
+    color: var(--body-text-color-subdued);
+}
+
+#mtm-fs .ps-pg-fontstar.ps-on {
+    color: #f5a623;
+}
+
+.ps-pg-fontpick {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 2px;
+    padding: 4px 6px;
+    border: none;
+    background: none;
+    color: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+
+.ps-pg-fontpick:hover {
+    background: var(--background-fill-secondary);
+}
+
+.ps-pg-fontname {
+    font-size: 12px;
+}
+
+.ps-pg-fontadded {
+    margin-left: 6px;
+    padding: 0 5px;
+    border-radius: 8px;
+    font-size: 10px;
+    background: var(--color-accent-soft);
+    color: var(--color-accent);
+}
+
+/* 見本は黒い字の画像なので、暗い表示でも白地に置く */
+.ps-pg-fontsample {
+    max-width: 100%;
+    height: 38px;
+    border-radius: 4px;
+    background: #fff;
 }
 
 /* セリフの入力欄 */
