@@ -15,7 +15,7 @@ import zipfile
 
 from fastapi import Body, Request
 from fastapi.responses import FileResponse, JSONResponse, Response
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageFont
 
 from modules import images, script_callbacks, scripts, shared
 from modules.infotext_utils import parse_generation_parameters
@@ -339,12 +339,60 @@ def _sanitize_page(raw, cut_ids):
                 "w": w,
                 "h": h,
             })
+        elif s.get("type") == "text":
+            text = _sanitize_text(s)
+            if text:
+                shapes.append(text)
     return {
         "type": "page",
         "id": _safe_id(raw.get("id")),
         "width": _page_size(raw.get("width"), PAGE_WIDTH),
         "height": _page_size(raw.get("height"), PAGE_HEIGHT),
         "shapes": shapes,
+    }
+
+
+# セリフ（文字）。素材の上の層に置く。x, y, w, h は画面で組んだときの枠で、書き出しでは枠の中心に合わせて組み直す。
+# font はフォントの id（font_path を参照）。size は文字の大きさ（ページのピクセル）、lineHeight は行の送り（文字の大きさの倍数）、
+# spacing は字間（文字の大きさに対する割合）、outline はフチの太さ（ピクセル。0 はフチなし）
+TEXT_MAX = 2000
+TEXT_SIZE = (8, 1000)
+TEXT_LINE = (1.0, 4.0)
+TEXT_SPACING = (-0.5, 2.0)
+TEXT_OUTLINE = (0, 64)
+
+
+def _ranged(value, lo, hi, default):
+    value = _number(value, default)
+    return min(max(value, lo), hi)
+
+
+def _color(value, default):
+    value = str(value or "")
+    return value.lower() if re.fullmatch(r"#[0-9a-fA-F]{6}", value) else default
+
+
+def _sanitize_text(s):
+    text = str(s.get("text", "")).replace("\r\n", "\n").replace("\r", "\n")[:TEXT_MAX]
+    if not text.strip():
+        return None
+    font = str(s.get("font", ""))
+    return {
+        "id": _safe_id(s.get("id")),
+        "type": "text",
+        "x": _number(s.get("x")),
+        "y": _number(s.get("y")),
+        "w": max(_number(s.get("w")), 0.0),
+        "h": max(_number(s.get("h")), 0.0),
+        "text": text,
+        "font": font if re.fullmatch(FONT_ID, font) else "",
+        "size": _ranged(s.get("size"), *TEXT_SIZE, 36),
+        "vertical": s.get("vertical") is not False,
+        "lineHeight": _ranged(s.get("lineHeight"), *TEXT_LINE, 1.5),
+        "spacing": _ranged(s.get("spacing"), *TEXT_SPACING, 0),
+        "color": _color(s.get("color"), "#000000"),
+        "outline": int(_ranged(s.get("outline"), *TEXT_OUTLINE, 0)),
+        "outlineColor": _color(s.get("outlineColor"), "#ffffff"),
     }
 
 
@@ -553,6 +601,157 @@ def save_material(project, data):
     return {"name": name, "width": image.width, "height": image.height}
 
 
+# ---------- フォント（セリフ用） ----------
+# この PC に入っているフォントのファイルを使う。id は「場所:場所からの相対パス#フェイスの番号」（例 win:YuGothM.ttc#0）。
+# TTC（複数のフェイスをまとめたファイル）は番号でフェイスを選ぶ。拡張フォルダの data/fonts/ に置いたフォントも使える
+
+FONT_ID = r"[a-z]{1,8}:[^#\x00]{1,300}#\d{1,2}"
+FONT_EXTENSIONS = (".ttf", ".otf", ".ttc", ".otc")
+FONT_FALLBACKS = ("win:YuGothM.ttc#0", "win:meiryo.ttc#0", "win:msgothic.ttc#0")
+
+_font_list = None       # [{id, name, style}]
+_font_cache = {}        # (パス, 番号, 大きさ) → ImageFont
+_face_cache = {}        # (パス, 番号) → TTC から取り出した 1 フェイスのバイト列（ブラウザ用）
+
+
+def font_roots():
+    home = os.path.expanduser("~")
+    roots = {
+        "win": os.path.join(os.environ.get("WINDIR", "C:\\Windows"), "Fonts") if os.name == "nt" else "",
+        "user": os.path.join(os.environ.get("LOCALAPPDATA", ""), "Microsoft", "Windows", "Fonts") if os.name == "nt" else "",
+        "ext": os.path.join(DATA_DIR, "fonts"),
+        "sys": "/usr/share/fonts" if os.name != "nt" else "",
+        "local": "/usr/local/share/fonts" if os.name != "nt" else "",
+        "home": os.path.join(home, ".local", "share", "fonts") if os.name != "nt" else "",
+        "mac": "/Library/Fonts" if os.name != "nt" else "",
+        "macsys": "/System/Library/Fonts" if os.name != "nt" else "",
+        "machome": os.path.join(home, "Library", "Fonts") if os.name != "nt" else "",
+    }
+    return {k: os.path.abspath(v) for k, v in roots.items() if v and os.path.isdir(v)}
+
+
+# id からフォントのファイルとフェイスの番号を引く。フォントの置き場所の外を指す id は受け付けない
+def font_path(font_id):
+    m = re.fullmatch(r"([a-z]{1,8}):([^#\x00]{1,300})#(\d{1,2})", str(font_id))
+    if not m:
+        raise ValueError(f"bad font id: {font_id}")
+    root = font_roots().get(m.group(1))
+    if not root:
+        raise ValueError(f"no font folder: {m.group(1)}")
+    path = os.path.abspath(os.path.join(root, m.group(2)))
+    if os.path.commonpath([root, path]) != root or not path.lower().endswith(FONT_EXTENSIONS) or not os.path.isfile(path):
+        raise ValueError(f"font not found: {font_id}")
+    return path, int(m.group(3))
+
+
+def _name_of(table, ids):
+    # 日本語の名前があればそれを、なければ英語、なければどれか
+    for name_id in ids:
+        records = [r for r in table.names if r.nameID == name_id]
+        for lang in (0x411, 0x409, None):
+            for r in records:
+                if lang is None or (r.platformID == 3 and r.langID == lang):
+                    try:
+                        text = r.toUnicode().strip()
+                    except Exception:
+                        continue
+                    if text:
+                        return text
+    return ""
+
+
+def _font_faces(path):
+    """[(番号, 名前, スタイル)]。fontTools があれば日本語の名前を読む。なければ PIL で読む（英語の名前）"""
+    faces = []
+    try:
+        from fontTools.ttLib import TTCollection, TTFont
+        if path.lower().endswith((".ttc", ".otc")):
+            with TTCollection(path, lazy=True) as coll:
+                fonts = list(coll.fonts)
+                for i, f in enumerate(fonts):
+                    faces.append((i, _name_of(f["name"], (16, 1)), _name_of(f["name"], (17, 2))))
+        else:
+            with TTFont(path, lazy=True) as f:
+                faces.append((0, _name_of(f["name"], (16, 1)), _name_of(f["name"], (17, 2))))
+        return [x for x in faces if x[1]]
+    except ImportError:
+        pass
+    except Exception:
+        return []
+    for i in range(32):
+        try:
+            family, style = ImageFont.truetype(path, 12, index=i).getname()
+        except Exception:
+            break
+        faces.append((i, family or "", style or ""))
+        if not path.lower().endswith((".ttc", ".otc")):
+            break
+    return [x for x in faces if x[1]]
+
+
+def list_fonts(refresh=False):
+    global _font_list
+    if _font_list is not None and not refresh:
+        return _font_list
+    fonts = []
+    for key, root in font_roots().items():
+        for folder, _, files in os.walk(root):
+            for file in files:
+                if not file.lower().endswith(FONT_EXTENSIONS):
+                    continue
+                path = os.path.join(folder, file)
+                rel = os.path.relpath(path, root).replace(os.sep, "/")
+                for index, family, style in _font_faces(path):
+                    fonts.append({"id": f"{key}:{rel}#{index}", "name": family, "style": style})
+    # 日本語の名前のフォントを先に、名前の順に
+    cjk = re.compile(r"[\u3040-\u30ff\u3400-\u9fff]")
+    fonts.sort(key=lambda f: (not cjk.search(f["name"]), f["name"].lower(), f["style"].lower()))
+    _font_list = fonts
+    return fonts
+
+
+# 書き出し用。見つからないフォントは、日本語の入った既定のフォントで代える
+def load_font(font_id, size):
+    for candidate in (font_id, *FONT_FALLBACKS):
+        try:
+            path, index = font_path(candidate)
+        except ValueError:
+            continue
+        key = (path, index, size)
+        if key not in _font_cache:
+            if len(_font_cache) > 64:
+                _font_cache.clear()
+            try:
+                _font_cache[key] = ImageFont.truetype(path, size, index=index)
+            except Exception:
+                continue
+        return _font_cache[key]
+    return ImageFont.load_default(size)
+
+
+# ブラウザに渡すフォント。TTC はブラウザでフェイスを選べないので、fontTools で 1 フェイスだけのファイルにする
+def font_bytes(font_id):
+    path, index = font_path(font_id)
+    if not path.lower().endswith((".ttc", ".otc")):
+        with open(path, "rb") as f:
+            return f.read()
+    key = (path, index)
+    if key not in _face_cache:
+        try:
+            from fontTools.ttLib import TTFont
+            with TTFont(path, fontNumber=index) as f:
+                out = io.BytesIO()
+                f.save(out)
+                data = out.getvalue()
+        except ImportError:
+            with open(path, "rb") as f:
+                data = f.read()
+        if len(_face_cache) >= 8:
+            _face_cache.pop(next(iter(_face_cache)))
+        _face_cache[key] = data
+    return _face_cache[key]
+
+
 def image_meta(path):
     mtime = os.path.getmtime(path)
     key = (path, mtime)
@@ -673,6 +872,119 @@ def _paste_material(canvas, project, s):
     canvas.paste(part, (round(s["x"]), round(s["y"])), part)
 
 
+# ---------- セリフの組み方（JS の layoutText と同じ） ----------
+# 縦書きは 1 文字ずつ、文字の大きさの升目に並べる。右の行から左へ。改行で次の行。
+#   - 「ー」「（」「」」などは 90° 回して置く。「、」「。」は升目の右上に、小さい「っ」などは少し右上に寄せる
+#   - 半角の数字・! ・? が 2 文字までのときは、横に並べて 1 升に入れる（縦中横）。升目に入らなければ縮める
+# 横書きは字形の幅で並べる。フチの太さの分だけ周りに余白を取る
+
+TEXT_ROTATE = "ー－−–—―…‥～〜~（）()「」『』【】〔〕［］[]｛｝{}〈〉《》＜＞<>＝=-_｜|：:"
+TEXT_CORNER = "、。，．､｡,."
+TEXT_SMALL = "ぁぃぅぇぉっゃゅょゎゕゖァィゥェォッャュョヮヵヶ"
+TEXT_TCY = "0123456789!?"
+
+
+def _vertical_cells(line):
+    cells, i = [], 0
+    while i < len(line):
+        j = i
+        while j < len(line) and line[j] in TEXT_TCY:
+            j += 1
+        if j > i:
+            run = line[i:j]
+            cells.extend([run] if len(run) <= 2 else list(run))
+            i = j
+        else:
+            cells.append(line[i])
+            i += 1
+    return cells
+
+
+def layout_text(s, measure):
+    """measure(文字列, 大きさ) は字形の幅。{w, h, glyphs: [{t, x, y, size, rot}]}（x, y は字の中心。枠の左上から）"""
+    size, pad = s["size"], s["outline"]
+    lines = s["text"].split("\n")
+    glyphs = []
+    if s["vertical"]:
+        adv, pitch = size * (1 + s["spacing"]), size * s["lineHeight"]
+        w = pad * 2 + size + (len(lines) - 1) * pitch
+        longest = size
+        for i, line in enumerate(lines):
+            cx = w - pad - size / 2 - i * pitch
+            cells = _vertical_cells(line)
+            for j, t in enumerate(cells):
+                cy = pad + size / 2 + j * adv
+                g = {"t": t, "x": cx, "y": cy, "size": size, "rot": False}
+                if len(t) > 1:
+                    tw = measure(t, size)
+                    if tw > size * 0.95:
+                        g["size"] = size * size * 0.95 / tw
+                elif t in TEXT_ROTATE:
+                    g["rot"] = True
+                elif t in TEXT_CORNER:
+                    g["x"], g["y"] = cx + size * 0.5, cy - size * 0.5
+                elif t in TEXT_SMALL:
+                    g["x"], g["y"] = cx + size * 0.08, cy - size * 0.08
+                glyphs.append(g)
+            if cells:
+                longest = max(longest, size + (len(cells) - 1) * adv)
+        h = pad * 2 + longest
+    else:
+        pitch = size * s["lineHeight"]
+        widest = size
+        for i, line in enumerate(lines):
+            cursor = 0.0
+            cy = pad + size / 2 + i * pitch
+            for j, ch in enumerate(line):
+                a = measure(ch, size)
+                if j:
+                    cursor += s["spacing"] * size
+                glyphs.append({"t": ch, "x": pad + cursor + a / 2, "y": cy, "size": size, "rot": False})
+                cursor += a
+            widest = max(widest, cursor)
+        w = pad * 2 + widest
+        h = pad * 2 + size + (len(lines) - 1) * pitch
+    return {"w": w, "h": h, "glyphs": glyphs}
+
+
+# セリフを描いて重ねる。フチは全部の字のフチを先に描いてから字を描く（隣の字のフチが字に掛からないように）
+def _paste_text(canvas, s):
+    fonts = {}
+
+    def font(size):
+        key = round(size, 2)
+        if key not in fonts:
+            fonts[key] = load_font(s["font"], key)
+        return fonts[key]
+
+    lay = layout_text(s, lambda t, size: font(size).getlength(t))
+    # 回した字や縦中横がはみ出しても切れないよう、周りに余白を取って描く
+    margin = int(s["size"] * 2 + s["outline"] * 2 + 4)
+    layer = Image.new("RGBA", (int(lay["w"]) + margin * 2 + 1, int(lay["h"]) + margin * 2 + 1), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(layer)
+    passes = ([(s["outlineColor"], s["outline"])] if s["outline"] else []) + [(s["color"], 0)]
+    for color, stroke in passes:
+        for g in lay["glyphs"]:
+            if not g["t"].strip():
+                continue
+            x, y = g["x"] + margin, g["y"] + margin
+            opts = {"font": font(g["size"]), "anchor": "mm", "fill": color}
+            if stroke:
+                opts.update(stroke_width=stroke, stroke_fill=color)
+            if not g["rot"]:
+                draw.text((x, y), g["t"], **opts)
+                continue
+            side = int(g["size"] * 2 + stroke * 2 + 4)
+            glyph = Image.new("RGBA", (side, side), (0, 0, 0, 0))
+            ImageDraw.Draw(glyph).text((side / 2, side / 2), g["t"], **opts)
+            glyph = glyph.rotate(-90)   # 時計回りに 90°
+            layer.alpha_composite(glyph, (int(round(x - side / 2)), int(round(y - side / 2))))
+    # 画面で組んだ枠の中心に合わせる
+    left = s["x"] + s["w"] / 2 - lay["w"] / 2 - margin
+    top = s["y"] + s["h"] / 2 - lay["h"] / 2 - margin
+    canvas.paste(layer, (round(left), round(top)), layer)
+
+
 # コマページを 1 枚の画像にする。見つからない画像の四角は空けておく。重なりの描き方は JS の drawPage と同じ：
 #   1. 「下を隠す」（front）でない四角の画像を、いちばん下にまとめて置く
 #   2. 図形の並び順（後ろほど手前）に線と直線を描く。「下を隠す」四角はその位置で白地・画像・線をまとめて描き、奥のものを隠す。
@@ -697,6 +1009,10 @@ def render_page(project, page):
     for s in page["shapes"]:
         if s["type"] == "material":
             _paste_material(canvas, project, s)
+    # 4. セリフはいちばん上に、並び順に
+    for s in page["shapes"]:
+        if s["type"] == "text":
+            _paste_text(canvas, s)
     out = io.BytesIO()
     canvas.save(out, "PNG")
     return out.getvalue()
@@ -841,6 +1157,23 @@ def on_app_started(demo, app):
             return FileResponse(path, media_type="image/png", headers={"Cache-Control": "max-age=31536000, immutable"})
         except Exception as e:
             return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
+
+    # セリフに使えるフォントの一覧。最初の 1 回はフォントを読むので少し時間がかかる（refresh で読み直す）
+    @app.get("/polaris-studio/fonts")
+    def get_fonts(refresh: bool = False):
+        try:
+            return {"ok": True, "fonts": list_fonts(refresh)}
+        except Exception as e:
+            return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+    # 編集画面で同じ字形を出すためのフォントのファイル
+    @app.get("/polaris-studio/font")
+    def get_font(id: str):
+        try:
+            data = font_bytes(id)
+        except Exception as e:
+            return JSONResponse({"ok": False, "error": str(e)}, status_code=404)
+        return Response(data, media_type="application/octet-stream", headers={"Cache-Control": "max-age=86400"})
 
     # 画像は実ファイルごと削除する（ごみ箱が使えればごみ箱へ）
     @app.post("/polaris-studio/images/delete")

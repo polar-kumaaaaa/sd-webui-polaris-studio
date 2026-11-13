@@ -2437,6 +2437,59 @@ body.mtm-fs-open {
     background: #5c5c5c;
 }
 
+/* セリフの書式の行（上の道具の行の続き） */
+.ps-pg-textbar {
+    padding-top: 0;
+}
+
+#mtm-fs .ps-pg-textbar input[type="number"] {
+    width: 64px;
+    padding: 3px 6px;
+}
+
+#mtm-fs .ps-pg-textbar input[type="color"] {
+    width: 34px;
+    height: 24px;
+    padding: 0 2px;
+    cursor: pointer;
+}
+
+#mtm-fs .ps-pg-font {
+    max-width: 240px;
+}
+
+/* セリフの入力欄 */
+.ps-pg-textedit {
+    flex: none;
+    display: flex;
+    align-items: flex-end;
+    gap: 8px;
+    padding: 8px 14px;
+    border-bottom: 1px solid var(--border-color-primary);
+    background: var(--background-fill-secondary);
+}
+
+#mtm-fs .ps-pg-textarea {
+    flex: 1;
+    min-height: 60px;
+    resize: vertical;
+    font-size: 15px;
+    line-height: 1.5;
+}
+
+.ps-pg-textedit-actions {
+    display: flex;
+    gap: 6px;
+}
+
+.ps-pg-stage[data-tool="text"] .ps-pg-slot-active .ps-pg-svg {
+    cursor: text;
+}
+
+.ps-pg-stage[data-tool="text"] .ps-pg-hits > .ps-pg-hit-text {
+    cursor: pointer;
+}
+
 /* 素材の画像ファイルを持って入ってきたとき */
 .ps-pg-stage.ps-pg-dropping {
     outline: 3px dashed var(--color-accent);
