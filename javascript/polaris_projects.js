@@ -87,6 +87,9 @@
         return "polaris-studio/image?" + query;
     }
 
+    // コマページに置いた素材（吹き出しなど）の画像。名前は中身から作るので、更新時刻はいらない
+    const materialUrl = (p, name) => "polaris-studio/material?" + new URLSearchParams({project: p.id, name});
+
     // キー画像。指定がない、または指定の画像がなくなったときは一番古い画像
     function keyImageOf(p, cut) {
         const list = imagesOf(p, cut);
@@ -1655,6 +1658,7 @@
             const no = el("span", {class: "ps-book-no", text: String(i + 1).padStart(width, "0")});
             const page = el("div", {class: "ps-book-page ps-book-komapage", draggable: "true", title: `コマページ ${r.width} × ${r.height}\nクリックで編集`}, [
                 window.PolarisPages.thumb(r, (ref) => {
+                    if (ref.material) return materialUrl(project, ref.material);
                     const found = findImage(ref);
                     return found ? imageUrl(project, found.cut, found.image, true) : null;
                 }),
@@ -1753,8 +1757,16 @@
             // コマで使っている印（サムネイル一覧と同じもの）
             panelMark,
             resolve: (ref, thumb) => {
+                if (ref.material) return materialUrl(project, ref.material);
                 const found = findImage(ref);
                 return found ? imageUrl(project, found.cut, found.image, thumb) : null;
+            },
+            // 素材（吹き出しなど）の画像をサーバーに保存する。{name, width, height} が返る
+            uploadMaterial: async (file) => {
+                const res = await fetch(`polaris-studio/materials/upload?project=${encodeURIComponent(project.id)}`, {method: "POST", body: file});
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok || !data.ok) throw new Error(data.error || res.status);
+                return data;
             },
             onChange: () => saveProjects(),
             onClose: () => {

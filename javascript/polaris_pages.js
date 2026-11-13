@@ -1,6 +1,7 @@
 // Polaris Studio: コマページ（漫画のコマ割り）
 // Book の中に置く白紙のページ。直線と四角を描き、四角には Book の画像の一部（クロップ範囲）をはめ込む。
 // 元の画像には手を加えず、どの画像のどの範囲かだけを持つ。ZIP の書き出しではサーバーが 1 枚の画像にする。
+// 吹き出し・集中線・小物などの画像は「素材」として、コマと線の上の層に自由に置ける。
 // 座標はすべてページのピクセル。四角の線は四角の内側に描き、画像は四角いっぱいに置く（サーバーの描き方と同じ）
 (function () {
     "use strict";
@@ -20,7 +21,7 @@
     const PREFS_KEY = "polaris-studio:page-tools";
     const RECT_HANDLES = ["nw", "n", "ne", "e", "se", "s", "sw", "w"];
     const HINTS = {
-        select: "クリックで選択、ドラッグで移動・サイズ変更。選んだ四角をもう一度クリック（またはダブルクリック）すると画像を選べます。Delete で削除、Ctrl+Z で元に戻す。Alt を押している間は吸着しません。重なったコマは「下を隠す」(H) で手前のコマだけの線にし、「前面へ」(])「背面へ」([) で手前にするコマを決めます。",
+        select: "クリックで選択、ドラッグで移動・サイズ変更。選んだ四角をもう一度クリック（またはダブルクリック）すると画像を選べます。Delete で削除、Ctrl+Z で元に戻す。Alt を押している間は吸着しません。重なったコマは「下を隠す」(H) で手前のコマだけの線にし、「前面へ」(])「背面へ」([) で手前にするコマを決めます。素材は角のつまみで縦横比を保って拡大・縮小（Shift で自由に）、辺のつまみで伸び縮みします。",
         line: "ドラッグで直線を引きます。Shift で水平・垂直。直線は分割線で、画像ははめ込めません。",
         rect: "ドラッグで四角を描きます。Shift で正方形。線「なし」にすると透明な四角（線のないコマ）になります。",
     };
@@ -69,6 +70,9 @@
         return {x: c.x + c.w / 2 - w / 2, y: c.y + c.h / 2 - h / 2, w, h};
     }
 
+    // 位置と大きさ（x, y, w, h）で持つ図形。直線は x1, y1, x2, y2
+    const boxy = (s) => s.type === "rect" || s.type === "material";
+
     // 下を隠す四角が、実際に後ろを隠すか。画像も線もない四角（配置の目安の透明な四角）は何も隠さない
     const hides = (s) => s.type === "rect" && s.front && (s.image || s.stroke);
 
@@ -115,6 +119,17 @@
             } else if (s.type === "line") {
                 g.appendChild(svgEl("line", {x1: s.x1, y1: s.y1, x2: s.x2, y2: s.y2, stroke: "#000", "stroke-width": s.stroke}));
             }
+        }
+        // 3. 素材（吹き出し・集中線・小物など）は、コマと線の上の層に並び順に重ねる。ページからはみ出した所は切る
+        const materials = page.shapes.filter((s) => s.type === "material");
+        if (materials.length) {
+            const layer = svgEl("svg", {x: 0, y: 0, width: page.width, height: page.height, viewBox: `0 0 ${page.width} ${page.height}`, overflow: "hidden"});
+            for (const s of materials) {
+                const url = resolve({material: s.name});
+                if (url) layer.appendChild(svgEl("image", {href: url, x: s.x, y: s.y, width: s.w, height: s.h, preserveAspectRatio: "none"}));
+                else if (editing) layer.appendChild(svgEl("rect", {x: s.x, y: s.y, width: s.w, height: s.h, class: "ps-pg-empty"}));
+            }
+            g.appendChild(layer);
         }
     }
 
@@ -203,6 +218,8 @@
                     <button type="button" class="mtm-btn ps-pg-raise" title="いちばん手前に出します (])">前面へ</button>
                     <button type="button" class="mtm-btn ps-pg-lower" title="いちばん奥に下げます ([)">背面へ</button>
                 </div>
+                <button type="button" class="mtm-btn ps-pg-material" title="吹き出し・集中線・小物などの画像を素材として置きます。素材はコマと線の上に重なります。画像ファイルをキャンバスにドロップするか、Ctrl+V で貼り付けても置けます">＋ 素材</button>
+                <input type="file" class="ps-pg-material-file ps-off" accept="image/*" multiple>
                 <button type="button" class="mtm-btn mtm-danger ps-pg-delete" title="選んだ図形を削除します (Delete)">削除</button>
                 <span class="mtm-fs-spacer"></span>
                 <label class="ps-pg-size">キャンバス
@@ -297,7 +314,103 @@
             e.preventDefault();
             wheelPage(e);
         }, {passive: false});
+        buildMaterials();
         buildCrop();
+    }
+
+    // ---------- 素材（吹き出し・集中線・小物など） ----------
+    // 画像ファイルのドロップ、クリップボードからの貼り付け、「＋ 素材」で置く。画像はサーバーに PNG で保存し、ページは名前と位置・大きさだけを持つ
+
+    let pointerAt = null;   // 最後にキャンバスの上にあったマウスの位置（ページのピクセル）。貼り付ける位置に使う
+    const MATERIAL_FIT = 0.8;   // 置くときは原寸。ページのこの割合に収まらなければ縮める
+    const MATERIAL_STEP = 40;   // まとめて置いたとき、1 枚ずつずらす量（ページのピクセル）
+
+    const imageFiles = (list) => [...(list || [])].filter((f) => f && /^image\//.test(f.type));
+    const hasFiles = (e) => !!e.dataTransfer && [...e.dataTransfer.types].includes("Files");
+
+    function buildMaterials() {
+        const stage = q(".ps-pg-stage");
+        svg.addEventListener("pointermove", (e) => (pointerAt = toPage(e)));
+        svg.addEventListener("pointerleave", () => (pointerAt = null));
+        // 編集画面のどこにドロップしても受ける（プロジェクトの画面の「画像からカット案を作る」には渡さない）。
+        // キャンバスの上ならその位置、ほかはページの中央に置く
+        view.addEventListener("dragover", (e) => {
+            if (!ed || !hasFiles(e)) return;
+            e.preventDefault();
+            e.stopPropagation();
+            const ok = !isCropOpen() && !!ed.opts.uploadMaterial;
+            e.dataTransfer.dropEffect = ok ? "copy" : "none";
+            stage.classList.toggle("ps-pg-dropping", ok);
+        });
+        view.addEventListener("dragleave", (e) => {
+            if (!view.contains(e.relatedTarget)) stage.classList.remove("ps-pg-dropping");
+        });
+        view.addEventListener("drop", (e) => {
+            if (!ed || !hasFiles(e)) return;
+            e.preventDefault();
+            e.stopPropagation();
+            stage.classList.remove("ps-pg-dropping");
+            if (isCropOpen()) return;
+            addMaterials(imageFiles(e.dataTransfer.files), svg.contains(e.target) ? toPage(e) : null);
+        });
+        // Ctrl+V。入力欄に貼り付けるときは邪魔しない
+        document.addEventListener("paste", (e) => {
+            if (!ed || isCropOpen() || /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName) || e.target.isContentEditable) return;
+            const files = imageFiles(e.clipboardData && e.clipboardData.files);
+            if (!files.length) return;
+            e.preventDefault();
+            addMaterials(files, pointerAt);
+        });
+        const input = q(".ps-pg-material-file");
+        q(".ps-pg-material").addEventListener("click", () => input.click());
+        input.addEventListener("change", () => {
+            const files = imageFiles(input.files);
+            input.value = "";
+            refocus();
+            addMaterials(files, null);
+        });
+    }
+
+    // 素材はページから一部はみ出してよい（裁ち落としの集中線など）。ただし MIN_SIZE だけはページに残して、掴めるようにする
+    function placeMaterial(s, x, y) {
+        s.x = round1(clamp(x, MIN_SIZE - s.w, ed.page.width - MIN_SIZE));
+        s.y = round1(clamp(y, MIN_SIZE - s.h, ed.page.height - MIN_SIZE));
+    }
+
+    // 画像をサーバーに保存してから、at（なければページの中央）を中心に原寸で置き、選んだ状態にする。1 枚ごとに元に戻せる
+    async function addMaterials(files, at) {
+        if (!ed || !files.length || !ed.opts.uploadMaterial) return;
+        const page = ed.page;
+        // ページの外（周りの灰色の所）に落としたときは、ページの端に寄せる
+        const center = at ? inPage(at) : {x: page.width / 2, y: page.height / 2};
+        let n = 0;
+        for (const file of files) {
+            let m;
+            try {
+                m = await ed.opts.uploadMaterial(file);
+            } catch (err) {
+                alert(`素材を置けませんでした（${file.name || "貼り付けた画像"}）。\n${err.message}`);
+                continue;
+            }
+            // 保存している間に画面を閉じたり、ページを変えたりしたら置かない
+            if (!ed || ed.page !== page) return;
+            const scale = Math.min(1, page.width * MATERIAL_FIT / m.width, page.height * MATERIAL_FIT / m.height);
+            const s = {id: newId(), type: "material", name: m.name, x: 0, y: 0, w: round1(m.width * scale), h: round1(m.height * scale)};
+            // 置いたときはページの中に収める（はみ出させるのは、置いたあとに動かして）
+            s.x = round1(clamp(center.x - s.w / 2 + n * MATERIAL_STEP, 0, page.width - s.w));
+            s.y = round1(clamp(center.y - s.h / 2 + n * MATERIAL_STEP, 0, page.height - s.h));
+            n++;
+            // すぐ動かせるよう、選択の道具に持ち替える
+            if (prefs.tool !== "select") {
+                prefs.tool = "select";
+                savePrefs();
+            }
+            if (drag) cancelDrag();
+            change(() => {
+                page.shapes.push(s);
+                ed.sel = s.id;
+            });
+        }
     }
 
     // ---------- 前後のコマページへの移動 ----------
@@ -506,7 +619,7 @@
     function setStroke(w) {
         const s = selected();
         const type = s ? s.type : prefs.tool === "line" ? "line" : "rect";
-        if (type === "line" && !w) return;
+        if ((type === "line" && !w) || type === "material") return;
         prefs[type] = w;
         savePrefs();
         if (s) change(() => (s.stroke = w));
@@ -569,8 +682,9 @@
         const current = s ? s.stroke : prefs[type];
         view.querySelectorAll("[data-stroke]").forEach((b) => {
             const w = Number(b.dataset.stroke);
-            b.classList.toggle("mtm-active", w === current);
-            b.disabled = type === "line" && !w;
+            // 素材には線がない
+            b.classList.toggle("mtm-active", type !== "material" && w === current);
+            b.disabled = (type === "line" && !w) || type === "material";
         });
         q(".ps-pg-pick").disabled = !s || s.type !== "rect";
         q(".ps-pg-delete").disabled = !s;
@@ -631,6 +745,10 @@
         for (const s of page.shapes) {
             if (s.type === "line") hits.appendChild(svgEl("line", {x1: s.x1, y1: s.y1, x2: s.x2, y2: s.y2, "stroke-width": Math.max(s.stroke, 14 * u), "data-id": s.id}));
         }
+        // 素材はいちばん上の層なので、クリックもいちばん手前で受ける
+        for (const s of page.shapes) {
+            if (s.type === "material") hits.appendChild(svgEl("rect", {x: s.x, y: s.y, width: s.w, height: s.h, "data-id": s.id}));
+        }
         svg.appendChild(hits);
         const s = selected();
         if (s) svg.appendChild(drawSelection(s, u));
@@ -643,7 +761,7 @@
             x: x - HANDLE * u / 2, y: y - HANDLE * u / 2, width: HANDLE * u, height: HANDLE * u,
             "data-handle": name, class: "ps-pg-handle ps-pg-handle-" + name,
         });
-        if (s.type === "rect") {
+        if (boxy(s)) {
             g.appendChild(svgEl("rect", {x: s.x, y: s.y, width: s.w, height: s.h, class: "ps-pg-sel-outline"}));
             const xs = {w: s.x, c: s.x + s.w / 2, e: s.x + s.w};
             const ys = {n: s.y, c: s.y + s.h / 2, s: s.y + s.h};
@@ -668,7 +786,7 @@
         const ys = [0, ed.page.height / 2, ed.page.height];
         for (const s of ed.page.shapes) {
             if (s.id === exceptId) continue;
-            if (s.type === "rect") {
+            if (boxy(s)) {
                 xs.push(s.x, s.x + s.w);
                 ys.push(s.y, s.y + s.h);
             } else {
@@ -788,7 +906,11 @@
         const o = drag.orig;
         let dx = p.x - drag.start.x;
         let dy = p.y - drag.start.y;
-        if (s.type === "rect") {
+        if (s.type === "material") {
+            dx += snapOffset([o.x + dx, o.x + o.w + dx], drag.targets.xs) || 0;
+            dy += snapOffset([o.y + dy, o.y + o.h + dy], drag.targets.ys) || 0;
+            placeMaterial(s, o.x + dx, o.y + dy);
+        } else if (s.type === "rect") {
             dx = clamp(dx, -o.x, ed.page.width - o.w - o.x);
             dy = clamp(dy, -o.y, ed.page.height - o.h - o.y);
             dx += snapOffset([o.x + dx, o.x + o.w + dx], drag.targets.xs) || 0;
@@ -811,6 +933,10 @@
     function dragHandle(p, shift) {
         const s = shapeOf(drag.id);
         const o = drag.orig;
+        if (s.type === "material") {
+            resizeMaterial(s, o, {x: snapX(p.x), y: snapY(p.y)}, shift);
+            return;
+        }
         const q2 = inPage({x: snapX(p.x), y: snapY(p.y)});
         if (s.type === "line") {
             const fixed = drag.handle === "p1" ? {x: o.x2, y: o.y2} : {x: o.x1, y: o.y1};
@@ -826,6 +952,29 @@
         if (drag.handle.includes("e")) r = Math.max(q2.x, l + MIN_SIZE);
         if (drag.handle.includes("n")) t = Math.min(q2.y, b - MIN_SIZE);
         if (drag.handle.includes("s")) b = Math.max(q2.y, t + MIN_SIZE);
+        Object.assign(s, {x: round1(l), y: round1(t), w: round1(r - l), h: round1(b - t)});
+    }
+
+    // 素材の大きさを変える。角のつまみは反対の角を止めて縦横比を保つ（free なら自由に）。辺のつまみはその向きだけ伸び縮みする。
+    // ページからはみ出してよい
+    function resizeMaterial(s, o, p, free) {
+        const h = drag.handle;
+        let l = o.x, t = o.y, r = o.x + o.w, b = o.y + o.h;
+        if (h.length === 2 && !free) {
+            const ax = h.includes("w") ? r : l;
+            const ay = h.includes("n") ? b : t;
+            const scale = Math.max(MIN_SIZE / Math.min(o.w, o.h), Math.abs(p.x - ax) / o.w, Math.abs(p.y - ay) / o.h);
+            const w = o.w * scale, hh = o.h * scale;
+            l = h.includes("w") ? ax - w : ax;
+            t = h.includes("n") ? ay - hh : ay;
+            r = l + w;
+            b = t + hh;
+        } else {
+            if (h.includes("w")) l = Math.min(p.x, r - MIN_SIZE);
+            if (h.includes("e")) r = Math.max(p.x, l + MIN_SIZE);
+            if (h.includes("n")) t = Math.min(p.y, b - MIN_SIZE);
+            if (h.includes("s")) b = Math.max(p.y, t + MIN_SIZE);
+        }
         Object.assign(s, {x: round1(l), y: round1(t), w: round1(r - l), h: round1(b - t)});
     }
 
@@ -877,7 +1026,9 @@
         const s = selected();
         if (!s) return;
         change(() => {
-            if (s.type === "rect") {
+            if (s.type === "material") {
+                placeMaterial(s, s.x + dx, s.y + dy);
+            } else if (s.type === "rect") {
                 s.x = round1(clamp(s.x + dx, 0, ed.page.width - s.w));
                 s.y = round1(clamp(s.y + dy, 0, ed.page.height - s.h));
             } else {

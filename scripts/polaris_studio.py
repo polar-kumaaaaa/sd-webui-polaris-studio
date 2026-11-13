@@ -2,6 +2,7 @@
 
 プロジェクト（タグ定義・シーン・カット案・キュー）は拡張フォルダ内の data/projects.json に保存する。
 """
+import hashlib
 import io
 import json
 import os
@@ -323,6 +324,21 @@ def _sanitize_page(raw, cut_ids):
                 **({"front": True} if s.get("front") is True else {}),
                 "image": _sanitize_panel_image(s.get("image"), cut_ids),
             })
+        elif s.get("type") == "material":
+            # 素材（吹き出し・集中線・小物など）。コマと線の上の層に、並び順（後ろほど手前）に置く。ページから一部はみ出してよい
+            name = str(s.get("name", ""))
+            w, h = _number(s.get("w")), _number(s.get("h"))
+            if not re.fullmatch(MATERIAL_NAME, name) or w < 1 or h < 1:
+                continue
+            shapes.append({
+                "id": _safe_id(s.get("id")),
+                "type": "material",
+                "name": name,
+                "x": _number(s.get("x")),
+                "y": _number(s.get("y")),
+                "w": w,
+                "h": h,
+            })
     return {
         "type": "page",
         "id": _safe_id(raw.get("id")),
@@ -495,6 +511,48 @@ def image_path(project, cut, name):
     return os.path.join(cut_dir(project, cut), name)
 
 
+# ---------- 素材（コマページに置く吹き出し・集中線・小物などの画像） ----------
+# <プロジェクトのフォルダ>/.materials/ に、メタ情報を持たない PNG で置く。名前は中身から作るので、同じ画像は 1 つになる。
+# フォルダ名は ID_PATTERN に合わないので、カット案のフォルダとは混ざらない。プロジェクトを削除すると一緒に消える
+
+MATERIAL_DIR = ".materials"
+MATERIAL_NAME = r"[0-9a-f]{20}\.png"
+MATERIAL_MAX_BYTES = 50 * 1024 * 1024
+
+
+def material_path(project, name):
+    if not re.fullmatch(MATERIAL_NAME, str(name)):
+        raise ValueError(f"bad material name: {name}")
+    return os.path.join(project_dir(project), MATERIAL_DIR, name)
+
+
+def save_material(project, data):
+    if not data:
+        raise ValueError("画像が空です")
+    if len(data) > MATERIAL_MAX_BYTES:
+        raise ValueError("画像が大きすぎます（50 MB まで）")
+    try:
+        with Image.open(io.BytesIO(data)) as src:
+            if src.width > PAGE_SIZE_MAX or src.height > PAGE_SIZE_MAX:
+                raise ValueError(f"画像が大きすぎます（縦横 {PAGE_SIZE_MAX} ピクセルまで）")
+            # 透明を保つ。動く画像は最初のコマだけ
+            image = src.convert("RGBA")
+    except ValueError:
+        raise
+    except Exception:
+        raise ValueError("画像として読めません")
+    out = io.BytesIO()
+    image.save(out, "PNG")
+    png = out.getvalue()
+    name = hashlib.sha256(png).hexdigest()[:20] + ".png"
+    path = material_path(project, name)
+    if not os.path.isfile(path):
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "wb") as f:
+            f.write(png)
+    return {"name": name, "width": image.width, "height": image.height}
+
+
 def image_meta(path):
     mtime = os.path.getmtime(path)
     key = (path, mtime)
@@ -605,6 +663,16 @@ def _paste_panel(canvas, project, s):
     canvas.paste(part, (round(s["x"]), round(s["y"])), part)
 
 
+# 素材を置いた大きさにして重ねる。ページからはみ出した所は切れる。見つからない素材は飛ばす
+def _paste_material(canvas, project, s):
+    path = material_path(project, s["name"])
+    if not os.path.isfile(path):
+        return
+    with Image.open(path) as src:
+        part = src.convert("RGBA").resize((max(1, round(s["w"])), max(1, round(s["h"]))), Image.LANCZOS)
+    canvas.paste(part, (round(s["x"]), round(s["y"])), part)
+
+
 # コマページを 1 枚の画像にする。見つからない画像の四角は空けておく。重なりの描き方は JS の drawPage と同じ：
 #   1. 「下を隠す」（front）でない四角の画像を、いちばん下にまとめて置く
 #   2. 図形の並び順（後ろほど手前）に線と直線を描く。「下を隠す」四角はその位置で白地・画像・線をまとめて描き、奥のものを隠す。
@@ -625,6 +693,10 @@ def render_page(project, page):
             draw.rectangle((x0, y0, x0 + round(s["w"]) - 1, y0 + round(s["h"]) - 1), outline="black", width=s["stroke"])
         elif s["type"] == "line":
             draw.line(((s["x1"], s["y1"]), (s["x2"], s["y2"])), fill="black", width=s["stroke"])
+    # 3. 素材は、コマと線の上に並び順に重ねる（透明な所は下が見える）
+    for s in page["shapes"]:
+        if s["type"] == "material":
+            _paste_material(canvas, project, s)
     out = io.BytesIO()
     canvas.save(out, "PNG")
     return out.getvalue()
@@ -748,6 +820,27 @@ def on_app_started(demo, app):
         except Exception as e:
             return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
         return {"ok": True, "name": saved}
+
+    # 素材の画像（リクエスト本文にそのまま入れたバイト列）を、メタ情報を持たない PNG にして保存する
+    @app.post("/polaris-studio/materials/upload")
+    async def upload_material(request: Request, project: str):
+        data = await request.body()
+        try:
+            saved = save_material(project, data)
+        except Exception as e:
+            return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
+        return {"ok": True, **saved}
+
+    # 素材の名前は中身から作るので、同じ名前なら中身も同じ（長くキャッシュしてよい）
+    @app.get("/polaris-studio/material")
+    def get_material(project: str, name: str):
+        try:
+            path = material_path(project, name)
+            if not os.path.isfile(path):
+                return JSONResponse({"ok": False, "error": "not found"}, status_code=404)
+            return FileResponse(path, media_type="image/png", headers={"Cache-Control": "max-age=31536000, immutable"})
+        except Exception as e:
+            return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
 
     # 画像は実ファイルごと削除する（ごみ箱が使えればごみ箱へ）
     @app.post("/polaris-studio/images/delete")

@@ -2437,6 +2437,12 @@ body.mtm-fs-open {
     background: #5c5c5c;
 }
 
+/* 素材の画像ファイルを持って入ってきたとき */
+.ps-pg-stage.ps-pg-dropping {
+    outline: 3px dashed var(--color-accent);
+    outline-offset: -6px;
+}
+
 .ps-pg-slot {
     position: relative;
     flex: 1 1 0;
