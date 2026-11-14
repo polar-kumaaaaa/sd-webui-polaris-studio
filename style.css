@@ -2658,7 +2658,8 @@ body.mtm-fs-open {
 }
 
 .ps-pg-stage[data-tool="line"] .ps-pg-slot-active .ps-pg-svg,
-.ps-pg-stage[data-tool="rect"] .ps-pg-slot-active .ps-pg-svg {
+.ps-pg-stage[data-tool="rect"] .ps-pg-slot-active .ps-pg-svg,
+.ps-pg-stage[data-tool="tri"] .ps-pg-slot-active .ps-pg-svg {
     cursor: crosshair;
 }
 
@@ -2681,7 +2682,8 @@ body.mtm-fs-open {
     vector-effect: non-scaling-stroke;
 }
 
-.ps-pg-hits rect {
+.ps-pg-hits rect,
+.ps-pg-hits polygon {
     fill: transparent;
 }
 
@@ -2710,8 +2712,30 @@ body.mtm-fs-open {
 }
 
 .ps-pg-stage[data-tool="line"] .ps-pg-sel,
-.ps-pg-stage[data-tool="rect"] .ps-pg-sel {
+.ps-pg-stage[data-tool="rect"] .ps-pg-sel,
+.ps-pg-stage[data-tool="tri"] .ps-pg-sel {
     pointer-events: none;
+}
+
+/* 頂点のつまみ（丸）。いま矢印キーで動かす頂点は塗る */
+.ps-pg-vertex {
+    fill: #fff;
+    stroke: var(--color-accent, #ff7c00);
+    stroke-width: 2px;
+    vector-effect: non-scaling-stroke;
+    cursor: crosshair;
+}
+
+.ps-pg-vertex.ps-on {
+    fill: var(--color-accent, #ff7c00);
+}
+
+/* 頂点の角度の表示 */
+.ps-pg-vinfo {
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
+    color: var(--body-text-color, #111);
+    white-space: nowrap;
 }
 
 .ps-pg-handle-nw, .ps-pg-handle-se { cursor: nwse-resize; }

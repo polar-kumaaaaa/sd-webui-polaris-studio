@@ -15,7 +15,7 @@ import zipfile
 
 from fastapi import Body, Request
 from fastapi.responses import FileResponse, JSONResponse, Response
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageChops, ImageDraw, ImageFont
 
 from modules import images, script_callbacks, scripts, shared
 from modules.infotext_utils import parse_generation_parameters
@@ -261,7 +261,8 @@ def _image_ref(raw, cut_ids):
 
 
 # ---------- コマページ ----------
-# 白紙のページに直線と四角を置く。四角には画像の一部（クロップ範囲）をはめ込める。
+# 白紙のページに直線と四角（コマ）を置く。四角には画像の一部（クロップ範囲）をはめ込める。
+# コマは頂点（pts）を持つと三角・台形・平行四辺形などの多角形になる。
 # 座標はすべてページのピクセル。四角の線は四角の内側に描き、画像は四角いっぱいに置く
 
 PAGE_WIDTH = 1573
@@ -298,6 +299,22 @@ def _stroke(value, allow_none):
     return value
 
 
+PANEL_POINTS = (3, 4)
+
+
+# 多角形のコマの頂点 [[x, y], ...]（3〜4 個、ページのピクセル）。形にならない（面積がほとんどない）ものは None
+def _panel_points(raw):
+    if not isinstance(raw, list) or len(raw) not in PANEL_POINTS:
+        return None
+    pts = []
+    for p in raw:
+        if not isinstance(p, (list, tuple)) or len(p) != 2:
+            return None
+        pts.append([_number(p[0]), _number(p[1])])
+    area = sum(a[0] * b[1] - b[0] * a[1] for a, b in zip(pts, pts[1:] + pts[:1])) / 2
+    return pts if abs(area) >= 16 else None
+
+
 def _sanitize_page(raw, cut_ids):
     shapes = []
     for s in _dicts(raw.get("shapes")):
@@ -309,16 +326,20 @@ def _sanitize_page(raw, cut_ids):
                 "stroke": _stroke(s.get("stroke"), False),
             })
         elif s.get("type") == "rect":
-            w, h = _number(s.get("w")), _number(s.get("h"))
-            if w < 1 or h < 1:
+            # pts があるコマは多角形（三角・台形・平行四辺形など）。x, y, w, h はその外枠で、画像は外枠に合わせて置き、多角形で切り抜く
+            pts = _panel_points(s.get("pts"))
+            if pts:
+                xs, ys = [p[0] for p in pts], [p[1] for p in pts]
+                box = {"x": min(xs), "y": min(ys), "w": round(max(xs) - min(xs), 1), "h": round(max(ys) - min(ys), 1)}
+            else:
+                box = {k: _number(s.get(k)) for k in ("x", "y", "w", "h")}
+            if box["w"] < 1 or box["h"] < 1:
                 continue
             shapes.append({
                 "id": _safe_id(s.get("id")),
                 "type": "rect",
-                "x": _number(s.get("x")),
-                "y": _number(s.get("y")),
-                "w": w,
-                "h": h,
+                **box,
+                **({"pts": pts} if pts else {}),
                 "stroke": _stroke(s.get("stroke"), True),
                 # 重なったとき、この四角で後ろのコマ（画像と線）を隠す
                 **({"front": True} if s.get("front") is True else {}),
@@ -885,7 +906,31 @@ def _paste_panel(canvas, project, s):
     box = (round(x * sx), round(y * sy), round((x + cw) * sx), round((y + ch) * sy))
     size = (max(1, round(s["w"])), max(1, round(s["h"])))
     part = src.crop(box).resize(size, Image.LANCZOS)
+    if s.get("pts"):
+        # 多角形のコマは、外枠に置いた画像を多角形の形で切り抜く
+        alpha = ImageChops.multiply(part.getchannel("A"), _polygon_mask(s, 0)[2])
+        part.putalpha(alpha)
     canvas.paste(part, (round(s["x"]), round(s["y"])), part)
+
+
+PANEL_AA = 4    # 多角形の縁を滑らかにするため、この倍の大きさで描いてから縮める
+
+
+# 多角形のコマの形（stroke が 0 なら中、そうでなければ内側に stroke の太さの線）を、外枠の大きさのマスクにする。
+# 戻り値は (左, 上, マスク)。線は四角と同じく形の内側に描く
+def _polygon_mask(s, stroke):
+    x0, y0 = round(s["x"]), round(s["y"])
+    w, h = max(1, round(s["w"])), max(1, round(s["h"]))
+    k = PANEL_AA
+    pts = [((px - x0) * k, (py - y0) * k) for px, py in s["pts"]]
+    fill = Image.new("L", (w * k, h * k), 0)
+    ImageDraw.Draw(fill).polygon(pts, fill=255)
+    if stroke:
+        # 辺に沿って倍の太さの線を引き、形の中に入る半分だけを残す
+        line = Image.new("L", fill.size, 0)
+        ImageDraw.Draw(line).line(pts + pts[:1], fill=255, width=stroke * 2 * k, joint="curve")
+        fill = ImageChops.multiply(fill, line)
+    return x0, y0, fill.resize((w, h), Image.BOX)
 
 
 # 素材を置いた大きさにして重ねる。ページからはみ出した所は切れる。見つからない素材は飛ばす
@@ -1023,10 +1068,17 @@ def render_page(project, page):
     draw = ImageDraw.Draw(canvas)
     for s in page["shapes"]:
         if s["type"] == "rect" and s.get("front") and (s.get("image") or s["stroke"]):
-            x0, y0 = round(s["x"]), round(s["y"])
-            draw.rectangle((x0, y0, x0 + round(s["w"]) - 1, y0 + round(s["h"]) - 1), fill="white")
+            if s.get("pts"):
+                x0, y0, mask = _polygon_mask(s, 0)
+                canvas.paste("white", (x0, y0, x0 + mask.width, y0 + mask.height), mask)
+            else:
+                x0, y0 = round(s["x"]), round(s["y"])
+                draw.rectangle((x0, y0, x0 + round(s["w"]) - 1, y0 + round(s["h"]) - 1), fill="white")
             _paste_panel(canvas, project, s)
-        if s["type"] == "rect" and s["stroke"]:
+        if s["type"] == "rect" and s["stroke"] and s.get("pts"):
+            x0, y0, mask = _polygon_mask(s, s["stroke"])
+            canvas.paste("black", (x0, y0, x0 + mask.width, y0 + mask.height), mask)
+        elif s["type"] == "rect" and s["stroke"]:
             x0, y0 = round(s["x"]), round(s["y"])
             draw.rectangle((x0, y0, x0 + round(s["w"]) - 1, y0 + round(s["h"]) - 1), outline="black", width=s["stroke"])
         elif s["type"] == "line":

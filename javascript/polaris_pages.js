@@ -21,9 +21,10 @@
     const PREFS_KEY = "polaris-studio:page-tools";
     const RECT_HANDLES = ["nw", "n", "ne", "e", "se", "s", "sw", "w"];
     const HINTS = {
-        select: "クリックで選択、ドラッグで移動・サイズ変更。選んだ四角をもう一度クリック（またはダブルクリック）すると画像を選べます。Delete で削除、Ctrl+Z で元に戻す。Alt を押している間は吸着しません。重なったコマは「下を隠す」(H) で手前のコマだけの線にし、「前面へ」(])「背面へ」([) で手前にするコマを決めます。素材は角のつまみで縦横比を保って拡大・縮小（Shift で自由に）、辺のつまみで伸び縮みします。",
+        select: "クリックで選択、ドラッグで移動・サイズ変更。選んだ四角をもう一度クリック（またはダブルクリック）すると画像を選べます。Delete で削除、Ctrl+Z で元に戻す。Alt を押している間は吸着しません。重なったコマは「下を隠す」(H) で手前のコマだけの線にし、「前面へ」(])「背面へ」([) で手前にするコマを決めます。素材は角のつまみで縦横比を保って拡大・縮小（Shift で自由に）、辺のつまみで伸び縮みします。「頂点を編集」(E) では、コマの角の丸いつまみをドラッグして台形・平行四辺形などにします（Shift で水平・垂直だけ、矢印キーで 1 px ずつ）。",
         line: "ドラッグで直線を引きます。Shift で水平・垂直。直線は分割線で、画像ははめ込めません。",
-        rect: "ドラッグで四角を描きます。Shift で正方形。線「なし」にすると透明な四角（線のないコマ）になります。",
+        rect: "ドラッグで四角を描きます。Shift で正方形。線「なし」にすると透明な四角（線のないコマ）になります。台形や平行四辺形は、四角を選んで「頂点を編集」(E) で角を動かして作ります。",
+        tri: "ドラッグで三角を描きます（ドラッグした枠の上の辺の真ん中が頂点。上へドラッグすると逆向き）。Shift で幅と高さをそろえます。描いたあとは「頂点を編集」(E) で角を動かせます。",
         text: "クリックした所にセリフを置き、文字を入力します（Ctrl+Enter で決定、Esc で取り消し）。置いたセリフをクリックすると文字を直せます。フォント・大きさ・縦書き/横書きなどは下の行で。動かすのは「選択」で。",
     };
 
@@ -75,6 +76,36 @@
     const boxy = (s) => s.type === "rect" || s.type === "material" || s.type === "text";
     // 置いたあとは自由に動かせる（ページから一部はみ出してよい）図形
     const floating = (s) => s.type === "material" || s.type === "text";
+
+    // ---------- 多角形のコマ（三角・台形・平行四辺形など） ----------
+    // 四角（type "rect"）が頂点 pts [[x, y], ...]（3〜4 個）を持つと多角形になる。x, y, w, h はいつも頂点の外枠にそろえる。
+    // 画像は外枠に合わせて置き、多角形の形で切り抜く。線は形の内側に描く（サーバーの _polygon_mask と同じ）
+    const polyArea = (pts) => pts.reduce((a, p, i) => {
+        const n = pts[(i + 1) % pts.length];
+        return a + p[0] * n[1] - n[0] * p[1];
+    }, 0) / 2;
+    // 図形の頂点。頂点のない四角は左上から時計回りの 4 つ
+    const cornersOf = (s) => s.pts ? s.pts.map((p) => [...p])
+        : [[s.x, s.y], [s.x + s.w, s.y], [s.x + s.w, s.y + s.h], [s.x, s.y + s.h]];
+    const pointsAttr = (pts) => pts.map((p) => p.join(",")).join(" ");
+    function setPoints(s, pts) {
+        s.pts = pts.map((p) => [round1(p[0]), round1(p[1])]);
+        const xs = s.pts.map((p) => p[0]), ys = s.pts.map((p) => p[1]);
+        Object.assign(s, {x: Math.min(...xs), y: Math.min(...ys), w: round1(Math.max(...xs) - Math.min(...xs)), h: round1(Math.max(...ys) - Math.min(...ys))});
+    }
+    // 頂点 i の角度。内角と、つながる 2 本の辺の傾き（水平・垂直からのずれ）
+    function vertexAngles(pts, i) {
+        const p = pts[i], a = pts[(i + pts.length - 1) % pts.length], b = pts[(i + 1) % pts.length];
+        const deg = (v) => v * 180 / Math.PI;
+        const tilt = (q) => {
+            const t = Math.abs(deg(Math.atan2(q[1] - p[1], q[0] - p[0]))) % 90;
+            return Math.min(t, 90 - t);
+        };
+        let inner = Math.abs(deg(Math.atan2(a[1] - p[1], a[0] - p[0]) - Math.atan2(b[1] - p[1], b[0] - p[0])));
+        if (inner > 180) inner = 360 - inner;
+        return {inner, tilts: [tilt(a), tilt(b)]};
+    }
+    let clipSeq = 0;
 
     // ---------- セリフ（文字）の組み方（サーバーの layout_text と同じ） ----------
     // 縦書きは 1 文字ずつ、文字の大きさの升目に並べる。右の行から左へ。改行で次の行。
@@ -246,19 +277,31 @@
     //      それより奥のものを隠す。なので「下を隠す」でない四角どうしは両方の線が見え、隠す四角では手前の線だけが見える
     function drawPage(g, page, resolve, editing) {
         g.appendChild(svgEl("rect", {x: 0, y: 0, width: page.width, height: page.height, fill: "#fff"}));
+        // 多角形のコマの形。fill などを付けて描くか、切り抜き（clipPath）に使う
+        const outline = (s, attrs) => s.pts ? svgEl("polygon", {points: pointsAttr(s.pts), ...attrs})
+            : svgEl("rect", {x: s.x, y: s.y, width: s.w, height: s.h, ...attrs});
+        const clipOf = (s) => {
+            const id = "ps-pg-clip-" + (++clipSeq);
+            g.appendChild(svgEl("clipPath", {id}, [outline(s, {})]));
+            return `url(#${id})`;
+        };
         const content = (s) => {
             const url = s.image && resolve(s.image);
             if (url) {
                 const c = panelCrop(s.image, s.w, s.h);
-                g.appendChild(svgEl("svg", {x: s.x, y: s.y, width: s.w, height: s.h, viewBox: `${c.x} ${c.y} ${c.w} ${c.h}`, preserveAspectRatio: "none"}, [
+                const box = svgEl("svg", {x: s.x, y: s.y, width: s.w, height: s.h, viewBox: `${c.x} ${c.y} ${c.w} ${c.h}`, preserveAspectRatio: "none"}, [
                     svgEl("image", {href: url, width: s.image.iw, height: s.image.ih, preserveAspectRatio: "none"}),
-                ]));
+                ]);
+                g.appendChild(s.pts ? svgEl("g", {"clip-path": clipOf(s)}, [box]) : box);
             } else if (editing) {
-                g.appendChild(svgEl("rect", {x: s.x, y: s.y, width: s.w, height: s.h, class: "ps-pg-empty"}));
-                const size = Math.min(s.w / 9, s.h / 3, Math.max(page.width, page.height) / 40);
+                g.appendChild(outline(s, {class: "ps-pg-empty"}));
+                // 三角では「＋ 画像」を重心に置き、小さめにする
+                const center = s.pts ? [s.pts.reduce((a, p) => a + p[0], 0) / s.pts.length, s.pts.reduce((a, p) => a + p[1], 0) / s.pts.length]
+                    : [s.x + s.w / 2, s.y + s.h / 2];
+                const size = Math.min(s.w / 9, s.h / 3, Math.max(page.width, page.height) / 40) * (s.pts && s.pts.length === 3 ? 0.7 : 1);
                 if (size >= 8) {
                     g.appendChild(svgEl("text", {
-                        x: s.x + s.w / 2, y: s.y + s.h / 2, "font-size": size, class: "ps-pg-empty-text",
+                        x: center[0], y: center[1], "font-size": size, class: "ps-pg-empty-text",
                         "text-anchor": "middle", "dominant-baseline": "middle",
                         text: s.image ? "画像が見つかりません" : "＋ 画像",
                     }));
@@ -269,9 +312,17 @@
             if (s.type === "rect" && !s.front) content(s);
         }
         for (const s of page.shapes) {
-            if (hides(s)) g.appendChild(svgEl("rect", {x: s.x, y: s.y, width: s.w, height: s.h, fill: "#fff"}));
+            if (hides(s)) g.appendChild(outline(s, {fill: "#fff"}));
             if (s.type === "rect" && s.front) content(s);
-            if (s.type === "rect" && s.stroke) {
+            if (s.type === "rect" && s.stroke && s.pts) {
+                // 倍の太さの線を形で切り抜き、内側の半分だけを見せる
+                g.appendChild(svgEl("polygon", {
+                    points: pointsAttr(s.pts), fill: "none", stroke: "#000", "stroke-width": s.stroke * 2,
+                    "stroke-linejoin": "round", "clip-path": clipOf(s),
+                }));
+            } else if (s.type === "rect" && s.pts && editing) {
+                g.appendChild(outline(s, {class: "ps-pg-ghost"}));
+            } else if (s.type === "rect" && s.stroke) {
                 g.appendChild(svgEl("rect", {
                     x: s.x + s.stroke / 2, y: s.y + s.stroke / 2,
                     width: Math.max(0, s.w - s.stroke), height: Math.max(0, s.h - s.stroke),
@@ -336,7 +387,7 @@
     function loadPrefs() {
         try {
             const saved = JSON.parse(localStorage.getItem(PREFS_KEY) || "{}");
-            if (["select", "line", "rect", "text"].includes(saved.tool)) prefs.tool = saved.tool;
+            if (["select", "line", "rect", "tri", "text"].includes(saved.tool)) prefs.tool = saved.tool;
             if (saved.text && typeof saved.text === "object") prefs.text = cleanTextStyle(saved.text);
             const ids = (v, max) => (Array.isArray(v) ? [...new Set(v.filter((x) => typeof x === "string" && x))].slice(0, max) : []);
             prefs.fontFavorites = ids(saved.fontFavorites, FONT_FAV_MAX);
@@ -381,6 +432,7 @@
                     <button type="button" class="mtm-btn" data-tool="select" title="選択・移動 (V)">選択</button>
                     <button type="button" class="mtm-btn" data-tool="line" title="直線 (L)">直線</button>
                     <button type="button" class="mtm-btn" data-tool="rect" title="四角 (R)">四角</button>
+                    <button type="button" class="mtm-btn" data-tool="tri" title="三角 (Y)">三角</button>
                     <button type="button" class="mtm-btn" data-tool="text" title="セリフ (T)。クリックした所に文字を置きます">セリフ</button>
                 </div>
                 <div class="ps-pg-group ps-pg-strokes">
@@ -388,6 +440,11 @@
                     ${STROKES.map((w) => `<button type="button" class="mtm-btn" data-stroke="${w}" title="${w ? w + " px" : "線なし（透明な四角）"}">${w || "なし"}</button>`).join("")}
                 </div>
                 <button type="button" class="mtm-btn ps-pg-pick" title="選んだ四角にはめ込む画像を選びます">画像を選ぶ</button>
+                <div class="ps-pg-group">
+                    <button type="button" class="mtm-btn ps-pg-vertex-mode" title="コマの角（頂点）を 1 つずつ動かして、台形・平行四辺形・三角の形を変えます。Shift を押しながらドラッグで元の位置から水平・垂直だけに動かし、矢印キーで最後に触った頂点を 1 px（Shift で 10 px）ずつ動かします (E)">頂点を編集</button>
+                    <button type="button" class="mtm-btn ps-pg-squarify" title="頂点を動かしたコマを、今の外枠の四角に戻します">四角に戻す</button>
+                </div>
+                <span class="ps-pg-vinfo"></span>
                 <div class="ps-pg-group">
                     <button type="button" class="mtm-btn ps-pg-front" title="重なったとき、このコマで後ろのコマ（画像と線）を隠します。オフなら両方の線を描きます (H)">下を隠す</button>
                     <button type="button" class="mtm-btn ps-pg-raise" title="いちばん手前に出します (])">前面へ</button>
@@ -493,6 +550,8 @@
             if (s && s.type === "rect") openPicker(s);
         });
         q(".ps-pg-delete").addEventListener("click", deleteSelected);
+        q(".ps-pg-vertex-mode").addEventListener("click", toggleVertexMode);
+        q(".ps-pg-squarify").addEventListener("click", squarify);
         q(".ps-pg-front").addEventListener("click", toggleFront);
         q(".ps-pg-raise").addEventListener("click", () => reorder(true));
         q(".ps-pg-lower").addEventListener("click", () => reorder(false));
@@ -1126,6 +1185,7 @@
         ed.page.height = data.height;
         ed.page.shapes = data.shapes;
         if (!selected()) ed.sel = null;
+        activeVertex = -1;
         commit();
     }
 
@@ -1168,8 +1228,38 @@
     }
 
     function select(id) {
+        if (ed.sel !== id) activeVertex = -1;
         ed.sel = id;
         render();
+    }
+
+    // 頂点の編集。オンの間は、選んだコマの角に丸いつまみを出す（外枠の大きさを変えるつまみの代わり）
+    let vertexMode = false;
+    let activeVertex = -1;      // 矢印キーで動かす頂点（最後に触った頂点）
+
+    function toggleVertexMode() {
+        vertexMode = !vertexMode;
+        activeVertex = -1;
+        if (vertexMode && prefs.tool !== "select") setTool("select");
+        else if (ed) render();
+        refocus();
+    }
+
+    // 多角形のコマを外枠の四角に戻す
+    function squarify() {
+        const s = selected();
+        if (!s || !s.pts) return;
+        activeVertex = -1;
+        change(() => delete s.pts);
+    }
+
+    // 頂点 i を p へ。形が潰れる（面積がほとんどない）位置には動かさない
+    function moveVertex(s, i, p) {
+        const pts = cornersOf(s);
+        pts[i] = [p.x, p.y];
+        if (Math.abs(polyArea(pts)) < MIN_SIZE * MIN_SIZE) return false;
+        setPoints(s, pts);
+        return true;
     }
 
     // 選んだ四角で、重なった後ろのコマを隠すかどうか
@@ -1232,6 +1322,19 @@
         q(".ps-pg-textbar").classList.toggle("ps-off", !textBar);
         if (textBar) fillTextBar(textShape || prefs.text);
         q(".ps-pg-pick").disabled = !s || s.type !== "rect";
+        q(".ps-pg-vertex-mode").classList.toggle("mtm-active", vertexMode);
+        q(".ps-pg-squarify").disabled = !s || !s.pts;
+        // 頂点の編集中は、最後に触った頂点の角度を出す
+        const vinfo = q(".ps-pg-vinfo");
+        if (vertexMode && s && s.type === "rect" && activeVertex >= 0) {
+            const pts = cornersOf(s);
+            const a = vertexAngles(pts, activeVertex);
+            const p = pts[activeVertex];
+            vinfo.textContent = `頂点 ${activeVertex + 1}：内角 ${a.inner.toFixed(1)}°　辺の傾き ${a.tilts[0].toFixed(1)}° / ${a.tilts[1].toFixed(1)}°　(${Math.round(p[0])}, ${Math.round(p[1])})`;
+            vinfo.title = "内角はこの角の開き。辺の傾きは、この角につながる 2 本の辺の水平・垂直からのずれです";
+        } else {
+            vinfo.textContent = "";
+        }
         q(".ps-pg-delete").disabled = !s;
         const front = q(".ps-pg-front");
         front.disabled = !s || s.type !== "rect";
@@ -1285,7 +1388,8 @@
         // クリックを受ける面。四角は中ごと、直線は細くても掴めるよう太めに取る。直線を四角より手前にする
         const hits = svgEl("g", {class: "ps-pg-hits"});
         for (const s of page.shapes) {
-            if (s.type === "rect") hits.appendChild(svgEl("rect", {x: s.x, y: s.y, width: s.w, height: s.h, "data-id": s.id}));
+            if (s.type === "rect" && s.pts) hits.appendChild(svgEl("polygon", {points: pointsAttr(s.pts), "data-id": s.id}));
+            else if (s.type === "rect") hits.appendChild(svgEl("rect", {x: s.x, y: s.y, width: s.w, height: s.h, "data-id": s.id}));
         }
         for (const s of page.shapes) {
             if (s.type === "line") hits.appendChild(svgEl("line", {x1: s.x1, y1: s.y1, x2: s.x2, y2: s.y2, "stroke-width": Math.max(s.stroke, 14 * u), "data-id": s.id}));
@@ -1316,7 +1420,15 @@
         if (s.type === "text") {
             const b = textBox(s);
             g.appendChild(svgEl("rect", {x: b.x, y: b.y, width: b.w, height: b.h, class: "ps-pg-sel-outline"}));
+        } else if (s.type === "rect" && vertexMode) {
+            const pts = cornersOf(s);
+            g.appendChild(svgEl("polygon", {points: pointsAttr(pts), class: "ps-pg-sel-outline"}));
+            pts.forEach((p, i) => g.appendChild(svgEl("circle", {
+                cx: p[0], cy: p[1], r: HANDLE * 0.65 * u, "data-handle": "v" + i,
+                class: "ps-pg-vertex" + (i === activeVertex ? " ps-on" : ""),
+            })));
         } else if (boxy(s)) {
+            if (s.pts) g.appendChild(svgEl("polygon", {points: pointsAttr(s.pts), class: "ps-pg-sel-outline"}));
             g.appendChild(svgEl("rect", {x: s.x, y: s.y, width: s.w, height: s.h, class: "ps-pg-sel-outline"}));
             const xs = {w: s.x, c: s.x + s.w / 2, e: s.x + s.w};
             const ys = {n: s.y, c: s.y + s.h / 2, s: s.y + s.h};
@@ -1344,6 +1456,10 @@
             if (boxy(s)) {
                 xs.push(s.x, s.x + s.w);
                 ys.push(s.y, s.y + s.h);
+                for (const p of s.pts || []) {
+                    xs.push(p[0]);
+                    ys.push(p[1]);
+                }
             } else {
                 xs.push(s.x1, s.x2);
                 ys.push(s.y1, s.y2);
@@ -1394,7 +1510,7 @@
             kind: "", id: "", start: p, client: {x: e.clientX, y: e.clientY}, moved: false,
             before: snapshot(), unit: unit(), noSnap: e.altKey, targets: null,
         };
-        if (prefs.tool === "line" || prefs.tool === "rect") {
+        if (prefs.tool === "line" || prefs.tool === "rect" || prefs.tool === "tri") {
             drag.kind = prefs.tool === "line" ? "newline" : "newrect";
             drag.targets = snapTargets("");
             drag.start = inPage({x: snapX(p.x), y: snapY(p.y)});
@@ -1405,6 +1521,11 @@
                 drag.kind = "handle";
                 drag.handle = handle.dataset.handle;
                 drag.id = ed.sel;
+                if (drag.handle[0] === "v") {
+                    activeVertex = Number(drag.handle.slice(1));
+                    drag.origPts = cornersOf(selected());
+                    render();
+                }
             } else if (hit) {
                 drag.kind = "move";
                 drag.id = hit.dataset.id;
@@ -1466,6 +1587,11 @@
             x: round1(Math.min(a.x, b.x)), y: round1(Math.min(a.y, b.y)),
             w: round1(Math.abs(b.x - a.x)), h: round1(Math.abs(b.y - a.y)),
         });
+        // 三角は枠の上の辺の真ん中を頂点にする。上へドラッグしたら下向き
+        if (prefs.tool === "tri") {
+            const l = s.x, r = s.x + s.w, t = s.y, bt = s.y + s.h, cx = s.x + s.w / 2;
+            s.pts = (b.y >= a.y ? [[cx, t], [r, bt], [l, bt]] : [[l, t], [r, t], [cx, bt]]).map((p) => [round1(p[0]), round1(p[1])]);
+        }
     }
 
     // 図形ごと動かす。ページの外には出さない。端のどちらかが近くの吸着先にそろう
@@ -1485,6 +1611,7 @@
             dy += snapOffset([o.y + dy, o.y + o.h + dy], drag.targets.ys) || 0;
             s.x = round1(clamp(o.x + dx, 0, ed.page.width - o.w));
             s.y = round1(clamp(o.y + dy, 0, ed.page.height - o.h));
+            if (o.pts) s.pts = o.pts.map((p) => [round1(p[0] + s.x - o.x), round1(p[1] + s.y - o.y)]);
         } else {
             const minX = Math.min(o.x1, o.x2), maxX = Math.max(o.x1, o.x2);
             const minY = Math.min(o.y1, o.y2), maxY = Math.max(o.y1, o.y2);
@@ -1505,6 +1632,15 @@
             resizeMaterial(s, o, {x: snapX(p.x), y: snapY(p.y)}, shift);
             return;
         }
+        if (drag.handle[0] === "v") {
+            // 頂点を動かす。Shift なら元の位置から水平か垂直だけ（台形・平行四辺形の辺の傾きを作りやすい）
+            const i = Number(drag.handle.slice(1));
+            const from = drag.origPts[i];
+            let v = inPage({x: snapX(p.x), y: snapY(p.y)});
+            if (shift) v = Math.abs(v.x - from[0]) >= Math.abs(v.y - from[1]) ? {x: v.x, y: from[1]} : {x: from[0], y: v.y};
+            moveVertex(s, i, v);
+            return;
+        }
         const q2 = inPage({x: snapX(p.x), y: snapY(p.y)});
         if (s.type === "line") {
             const fixed = drag.handle === "p1" ? {x: o.x2, y: o.y2} : {x: o.x1, y: o.y1};
@@ -1521,6 +1657,10 @@
         if (drag.handle.includes("n")) t = Math.min(q2.y, b - MIN_SIZE);
         if (drag.handle.includes("s")) b = Math.max(q2.y, t + MIN_SIZE);
         Object.assign(s, {x: round1(l), y: round1(t), w: round1(r - l), h: round1(b - t)});
+        // 多角形は外枠に合わせて頂点を伸び縮みさせる
+        if (o.pts) {
+            setPoints(s, o.pts.map((pt) => [l + (pt[0] - o.x) * (r - l) / o.w, t + (pt[1] - o.y) * (b - t) / o.h]));
+        }
     }
 
     // 素材の大きさを変える。角のつまみは反対の角を止めて縦横比を保つ（free なら自由に）。辺のつまみはその向きだけ伸び縮みする。
@@ -1598,9 +1738,15 @@
         change(() => {
             if (floating(s)) {
                 placeMaterial(s, s.x + dx, s.y + dy);
+            } else if (s.type === "rect" && vertexMode && activeVertex >= 0) {
+                // 頂点の編集中は、最後に触った頂点だけを動かす
+                const p = cornersOf(s)[activeVertex];
+                moveVertex(s, activeVertex, inPage({x: p[0] + dx, y: p[1] + dy}));
             } else if (s.type === "rect") {
+                const ox = s.x, oy = s.y;
                 s.x = round1(clamp(s.x + dx, 0, ed.page.width - s.w));
                 s.y = round1(clamp(s.y + dy, 0, ed.page.height - s.h));
+                if (s.pts) s.pts = s.pts.map((p) => [round1(p[0] + s.x - ox), round1(p[1] + s.y - oy)]);
             } else {
                 const minX = Math.min(s.x1, s.x2), maxX = Math.max(s.x1, s.x2);
                 const minY = Math.min(s.y1, s.y2), maxY = Math.max(s.y1, s.y2);
@@ -1680,9 +1826,12 @@
             stop();
             const step = e.shiftKey ? 10 : 1;
             nudge({ArrowLeft: -step, ArrowRight: step}[e.key] || 0, {ArrowUp: -step, ArrowDown: step}[e.key] || 0);
-        } else if (key === "v" || key === "l" || key === "r" || key === "t") {
+        } else if (key === "v" || key === "l" || key === "r" || key === "y" || key === "t") {
             stop();
-            setTool({v: "select", l: "line", r: "rect", t: "text"}[key]);
+            setTool({v: "select", l: "line", r: "rect", y: "tri", t: "text"}[key]);
+        } else if (key === "e") {
+            stop();
+            toggleVertexMode();
         } else if (key === "h" && selected()) {
             stop();
             toggleFront();
