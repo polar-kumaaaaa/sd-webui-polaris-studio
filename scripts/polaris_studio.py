@@ -174,33 +174,39 @@ def _amount(data):
 
 def backup_projects(new_data):
     """上書きする前の projects.json を data/backups/ に控える。"""
-    if not os.path.exists(PROJECTS_FILE):
+    backup_file(PROJECTS_FILE, "projects", new_data, _amount)
+
+
+def backup_file(file, prefix, new_data, amount):
+    """上書きする前の file を data/backups/<prefix>-<日時>.json に控える。
+    BACKUP_INTERVAL に 1 回、ただし amount(data) のどれかが減る保存のときは毎回取る。新しいものから BACKUP_KEEP 件を残す"""
+    if not os.path.exists(file):
         return
     os.makedirs(BACKUP_DIR, exist_ok=True)
-    names = _backup_names()
+    names = _backup_names(prefix)
     try:
-        with open(PROJECTS_FILE, "r", encoding="utf-8") as f:
+        with open(file, "r", encoding="utf-8") as f:
             old = json.load(f)
-        shrinks = any(n < o for n, o in zip(_amount(new_data), _amount(old if isinstance(old, dict) else {})))
+        shrinks = any(n < o for n, o in zip(amount(new_data), amount(old if isinstance(old, dict) else {})))
     except Exception:
         shrinks = True
     recent = names and time.time() - os.path.getmtime(os.path.join(BACKUP_DIR, names[-1])) < BACKUP_INTERVAL
     if recent and not shrinks:
         return
     stamp = time.strftime("%Y%m%d-%H%M%S")
-    path = os.path.join(BACKUP_DIR, f"projects-{stamp}.json")
+    path = os.path.join(BACKUP_DIR, f"{prefix}-{stamp}.json")
     n = 1
     while os.path.exists(path):
         n += 1
-        path = os.path.join(BACKUP_DIR, f"projects-{stamp}-{n}.json")
-    shutil.copyfile(PROJECTS_FILE, path)
-    for old_name in _backup_names()[:-BACKUP_KEEP]:
+        path = os.path.join(BACKUP_DIR, f"{prefix}-{stamp}-{n}.json")
+    shutil.copyfile(file, path)
+    for old_name in _backup_names(prefix)[:-BACKUP_KEEP]:
         os.remove(os.path.join(BACKUP_DIR, old_name))
 
 
 # 控えのファイル名を古い順に
-def _backup_names():
-    names = [n for n in os.listdir(BACKUP_DIR) if n.startswith("projects-") and n.endswith(".json")]
+def _backup_names(prefix="projects"):
+    names = [n for n in os.listdir(BACKUP_DIR) if n.startswith(prefix + "-") and n.endswith(".json")]
     return sorted(names, key=lambda n: os.path.getmtime(os.path.join(BACKUP_DIR, n)))
 
 
@@ -879,8 +885,19 @@ def load_sfx_library():
         return sanitize_sfx_library({})
 
 
+# 中身の量（文字列の数、調整済みスタンプの数）。どちらかが減る保存の前には、必ず控えを取る
+def _sfx_amount(data):
+    words = data.get("words") if isinstance(data.get("words"), str) else ""
+    return len([w for w in words.splitlines() if w.strip()]), len(_dicts(data.get("stamps")))
+
+
 def save_sfx_library(data):
     os.makedirs(DATA_DIR, exist_ok=True)
+    try:
+        backup_file(SFX_FILE, "sfx", data, _sfx_amount)
+    except Exception as e:
+        # 控えが取れなくても保存は止めない
+        print(f"[Polaris Studio] failed to back up {SFX_FILE}: {e}")
     tmp = SFX_FILE + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump({"version": 1, **data}, f, ensure_ascii=False, indent=2)
