@@ -2425,8 +2425,203 @@ body.mtm-fs-open {
 }
 
 /* 並べたコマページ。右から Book の順（漫画の見開きと同じ向き） */
+/* キャンバスと、右のオノマトペのパレット */
+.ps-pg-body {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+}
+
+.ps-pg-sfx {
+    flex: none;
+    width: 300px;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    border-left: 1px solid var(--border-color-primary);
+    background: var(--background-fill-primary);
+}
+
+.ps-pg-sfx.ps-off {
+    display: none;
+}
+
+.ps-pg-sfx-head {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 10px;
+    border-bottom: 1px solid var(--border-color-primary);
+    font-weight: bold;
+}
+
+.ps-pg-sfx-scroll {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    padding: 8px 10px 16px;
+}
+
+.ps-pg-sfx-label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin: 12px 0 6px;
+    font-size: 12px;
+    font-weight: bold;
+    color: var(--body-text-color-subdued);
+}
+
+.ps-pg-sfx-label:first-child {
+    margin-top: 0;
+}
+
+.ps-pg-sfx-note {
+    font-weight: normal;
+}
+
+.ps-pg-sfx-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    margin: 6px 0;
+}
+
+.ps-pg-sfx-row label {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 12px;
+}
+
+#mtm-fs .ps-pg-sfx-newsize {
+    width: 64px;
+}
+
+.ps-pg-sfx-presets {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+}
+
+.ps-pg-sfx-check {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    margin: 6px 0;
+}
+
+.ps-pg-sfx-words {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+}
+
+.ps-pg-sfx-word {
+    font-weight: bold;
+}
+
+#mtm-fs .ps-pg-sfx-textarea {
+    width: 100%;
+    box-sizing: border-box;
+    resize: vertical;
+    font-size: 14px;
+    line-height: 1.5;
+}
+
+.ps-pg-sfx-stamps {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 6px;
+}
+
+.ps-pg-sfx-stamps > .mtm-empty {
+    grid-column: 1 / -1;
+}
+
+.ps-pg-sfx-stamp {
+    position: relative;
+}
+
+.ps-pg-sfx-stamp-pick {
+    display: block;
+    width: 100%;
+    aspect-ratio: 1;
+    padding: 4px;
+    box-sizing: border-box;
+    border: 1px solid var(--border-color-primary);
+    border-radius: 6px;
+    /* 白い字や白いフチも見えるよう、薄い灰色の地にする */
+    background: #d8d8dc;
+    cursor: pointer;
+}
+
+.ps-pg-sfx-stamp.ps-on .ps-pg-sfx-stamp-pick {
+    outline: 3px solid var(--color-accent);
+    outline-offset: -1px;
+}
+
+.ps-pg-sfx-stamp-pick .ps-sfx-preview {
+    width: 100%;
+    height: 100%;
+}
+
+.ps-pg-sfx-stamp-del {
+    position: absolute;
+    top: 2px;
+    right: 2px;
+    opacity: 0;
+}
+
+.ps-pg-sfx-stamp:hover .ps-pg-sfx-stamp-del {
+    opacity: 1;
+}
+
+.ps-pg-sfx-group {
+    margin-top: 4px;
+}
+
+.ps-pg-sfx-field {
+    display: grid;
+    grid-template-columns: 84px 1fr 58px 20px;
+    align-items: center;
+    gap: 6px;
+    margin: 3px 0;
+    font-size: 12px;
+}
+
+.ps-pg-sfx-textfield {
+    grid-template-columns: 84px 1fr;
+}
+
+#mtm-fs .ps-pg-sfx-field input[type="range"] {
+    width: 100%;
+    min-width: 0;
+}
+
+#mtm-fs .ps-pg-sfx-num,
+#mtm-fs .ps-pg-sfx-text {
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.ps-pg-sfx-unit {
+    color: var(--body-text-color-subdued);
+}
+
+.ps-pg-stage[data-tool="sfx"] .ps-pg-slot-active .ps-pg-svg {
+    cursor: copy;
+}
+
+.ps-pg-stage[data-tool="sfx"] .ps-pg-sel {
+    pointer-events: none;
+}
+
 .ps-pg-stage {
     flex: 1;
+    min-width: 0;
     min-height: 0;
     position: relative;
     display: flex;

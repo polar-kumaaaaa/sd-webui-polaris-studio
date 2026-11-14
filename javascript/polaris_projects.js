@@ -1727,6 +1727,13 @@
         await saveProjects();
     }
 
+    async function uploadMaterial(p, file) {
+        const res = await fetch(`polaris-studio/materials/upload?project=${encodeURIComponent(p.id)}`, {method: "POST", body: file});
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || !data.ok) throw new Error(data.error || res.status);
+        return data;
+    }
+
     function openPageEditor(book, page) {
         window.PolarisPages.open({
             host: overlay,
@@ -1762,12 +1769,7 @@
                 return found ? imageUrl(project, found.cut, found.image, thumb) : null;
             },
             // 素材（吹き出しなど）の画像をサーバーに保存する。{name, width, height} が返る
-            uploadMaterial: async (file) => {
-                const res = await fetch(`polaris-studio/materials/upload?project=${encodeURIComponent(project.id)}`, {method: "POST", body: file});
-                const data = await res.json().catch(() => ({}));
-                if (!res.ok || !data.ok) throw new Error(data.error || res.status);
-                return data;
-            },
+            uploadMaterial: (file) => uploadMaterial(project, file),
             onChange: () => saveProjects(),
             onClose: () => {
                 renderBooks();
@@ -1814,6 +1816,11 @@
         button.disabled = true;
         button.textContent = "書き出し中…";
         try {
+            // オノマトペの書き出し用の画像が古ければ、先に作り直して保存する
+            if (window.PolarisSfx) {
+                const p = project;
+                if (await window.PolarisSfx.bake(pageItems(book), (blob) => uploadMaterial(p, blob))) await saveProjects();
+            }
             const res = await fetch("polaris-studio/books/export", {
                 method: "POST", headers: {"Content-Type": "application/json"},
                 body: JSON.stringify({project: project.id, items: book.items}),

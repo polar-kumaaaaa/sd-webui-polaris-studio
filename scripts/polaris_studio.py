@@ -364,6 +364,25 @@ def _sanitize_page(raw, cut_ids):
             text = _sanitize_text(s)
             if text:
                 shapes.append(text)
+        elif s.get("type") == "sfx":
+            # オノマトペ。形は params で決まり、ブラウザで描く。書き出しには、ブラウザで描いた画像（素材と同じ置き場所の name）を使う。
+            # 素材と同じ層に、並び順に重ねる
+            params = sanitize_sfx_params(s.get("params"))
+            name = str(s.get("name", ""))
+            w, h = _number(s.get("w")), _number(s.get("h"))
+            if params is None or w < 1 or h < 1:
+                continue
+            shapes.append({
+                "id": _safe_id(s.get("id")),
+                "type": "sfx",
+                "name": name if re.fullmatch(MATERIAL_NAME, name) else "",
+                **({"key": str(s.get("key"))[:64]} if s.get("key") else {}),
+                "x": _number(s.get("x")),
+                "y": _number(s.get("y")),
+                "w": w,
+                "h": h,
+                "params": params,
+            })
     return {
         "type": "page",
         "id": _safe_id(raw.get("id")),
@@ -799,6 +818,129 @@ def font_bytes(font_id):
     return _face_cache[key]
 
 
+# ---------- オノマトペ ----------
+# 字形の輪郭はサーバーが fontTools で取り出し、ブラウザで並べ・ゆらして描く。
+# 登録した文字列と調整済みスタンプは、プロジェクトをまたいで使えるよう data/sfx.json に置く
+
+SFX_FILE = os.path.join(DATA_DIR, "sfx.json")
+SFX_PARAMS_MAX = 8000       # 1 つのスタンプの設定（JSON）の大きさの上限
+SFX_WORDS_MAX = 20000
+SFX_STAMPS_MAX = 500
+SFX_TEXT_MAX = 200          # 1 回に輪郭を取り出す字の数
+
+_glyph_lock = threading.Lock()
+_glyph_cache = {}           # (フォントの id, 字) → 輪郭
+_ttfont_cache = {}          # (パス, 番号) → TTFont
+
+
+def sanitize_sfx_params(raw):
+    """スタンプの設定。中身はブラウザだけが使うので、JSON にできる値に限り、大きさを抑える"""
+    if not isinstance(raw, dict):
+        return None
+
+    def clean(v, depth):
+        if v is None or isinstance(v, bool):
+            return v
+        if isinstance(v, (int, float)):
+            return v if v == v and abs(v) < 1e9 else 0
+        if isinstance(v, str):
+            return v[:300]
+        if depth < 4 and isinstance(v, list):
+            return [clean(x, depth + 1) for x in v[:32]]
+        if depth < 4 and isinstance(v, dict):
+            return {str(k)[:40]: clean(x, depth + 1) for k, x in list(v.items())[:64]}
+        return None
+
+    out = clean(raw, 0)
+    return out if len(json.dumps(out, ensure_ascii=False)) <= SFX_PARAMS_MAX else None
+
+
+def sanitize_sfx_library(raw):
+    raw = raw if isinstance(raw, dict) else {}
+    stamps = []
+    for s in _dicts(raw.get("stamps"))[:SFX_STAMPS_MAX]:
+        params = sanitize_sfx_params(s.get("params"))
+        if params is not None:
+            stamps.append({"id": _safe_id(s.get("id")), "params": params})
+    words = raw.get("words")
+    return {"words": words[:SFX_WORDS_MAX] if isinstance(words, str) else "", "stamps": stamps}
+
+
+def load_sfx_library():
+    try:
+        with open(SFX_FILE, "r", encoding="utf-8") as f:
+            return sanitize_sfx_library(json.load(f))
+    except FileNotFoundError:
+        return sanitize_sfx_library({})
+    except Exception as e:
+        print(f"[Polaris Studio] failed to load {SFX_FILE}: {e}")
+        broken = os.path.join(DATA_DIR, f"sfx.broken-{int(time.time())}.json")
+        os.replace(SFX_FILE, broken)
+        return sanitize_sfx_library({})
+
+
+def save_sfx_library(data):
+    os.makedirs(DATA_DIR, exist_ok=True)
+    tmp = SFX_FILE + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump({"version": 1, **data}, f, ensure_ascii=False, indent=2)
+    os.replace(tmp, SFX_FILE)
+
+
+def _ttfont(font_id):
+    from fontTools.ttLib import TTFont
+    path, index = font_path(font_id)
+    key = (path, index)
+    if key not in _ttfont_cache:
+        if len(_ttfont_cache) >= 8:
+            _ttfont_cache.pop(next(iter(_ttfont_cache))).close()
+        _ttfont_cache[key] = TTFont(path, fontNumber=index, lazy=True)
+    return _ttfont_cache[key]
+
+
+def _num(v):
+    return f"{v:.1f}".rstrip("0").rstrip(".")
+
+
+def glyph_outline(font_id, ch):
+    """字形の輪郭 {d, adv, cy}。em を 1000 にそろえ、y は下向き、原点は基準線の左端。
+    cy は字の枠（em）の上下の中央。フォントにない字は既定のフォントで、どれにもなければ空"""
+    from fontTools.pens.svgPathPen import SVGPathPen
+    from fontTools.pens.transformPen import TransformPen
+    for candidate in (font_id, *FONT_FALLBACKS):
+        key = (candidate, ch)
+        if key in _glyph_cache:
+            return _glyph_cache[key]
+        try:
+            font = _ttfont(candidate)
+            name = (font.getBestCmap() or {}).get(ord(ch))
+        except Exception:
+            continue
+        if name is None:
+            continue
+        scale = 1000 / font["head"].unitsPerEm
+        os2 = font["OS/2"] if "OS/2" in font else None
+        if os2 is not None and os2.sTypoAscender - os2.sTypoDescender > 0:
+            asc, desc = os2.sTypoAscender, os2.sTypoDescender
+        else:
+            asc, desc = font["hhea"].ascent, font["hhea"].descent
+        glyphs = font.getGlyphSet()
+        pen = SVGPathPen(glyphs, ntos=_num)
+        glyphs[name].draw(TransformPen(pen, (scale, 0, 0, -scale, 0, 0)))
+        result = {"d": pen.getCommands(), "adv": round(glyphs[name].width * scale, 1), "cy": round(-(asc + desc) / 2 * scale, 1)}
+        if len(_glyph_cache) > 20000:
+            _glyph_cache.clear()
+        _glyph_cache[key] = result
+        return result
+    return {"d": "", "adv": 500, "cy": -380}
+
+
+def glyph_outlines(font_id, text):
+    chars = list(dict.fromkeys(str(text)))[:SFX_TEXT_MAX]
+    with _glyph_lock:
+        return {ch: glyph_outline(font_id, ch) for ch in chars}
+
+
 def image_meta(path):
     mtime = os.path.getmtime(path)
     key = (path, mtime)
@@ -1083,9 +1225,9 @@ def render_page(project, page):
             draw.rectangle((x0, y0, x0 + round(s["w"]) - 1, y0 + round(s["h"]) - 1), outline="black", width=s["stroke"])
         elif s["type"] == "line":
             draw.line(((s["x1"], s["y1"]), (s["x2"], s["y2"])), fill="black", width=s["stroke"])
-    # 3. 素材は、コマと線の上に並び順に重ねる（透明な所は下が見える）
+    # 3. 素材とオノマトペは、コマと線の上に並び順に重ねる（透明な所は下が見える）
     for s in page["shapes"]:
-        if s["type"] == "material":
+        if s["type"] in ("material", "sfx") and s["name"]:
             _paste_material(canvas, project, s)
     # 4. セリフはいちばん上に、並び順に
     for s in page["shapes"]:
@@ -1261,6 +1403,30 @@ def on_app_started(demo, app):
         except Exception as e:
             return JSONResponse({"ok": False, "error": str(e)}, status_code=404)
         return Response(data, media_type="application/octet-stream", headers={"Cache-Control": "max-age=86400"})
+
+    # オノマトペの字形の輪郭
+    @app.get("/polaris-studio/glyphs")
+    def get_glyphs(font: str, text: str):
+        try:
+            return {"ok": True, "glyphs": glyph_outlines(font, text)}
+        except Exception as e:
+            return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
+
+    # オノマトペの登録した文字列と調整済みスタンプ（プロジェクトをまたいで共通）
+    @app.get("/polaris-studio/sfx")
+    def get_sfx():
+        with _lock:
+            return {"ok": True, **load_sfx_library()}
+
+    @app.post("/polaris-studio/sfx")
+    def put_sfx(payload: dict = Body(...)):
+        data = sanitize_sfx_library(payload)
+        try:
+            with _lock:
+                save_sfx_library(data)
+        except Exception as e:
+            return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+        return {"ok": True, **data}
 
     # 画像は実ファイルごと削除する（ごみ箱が使えればごみ箱へ）
     @app.post("/polaris-studio/images/delete")
