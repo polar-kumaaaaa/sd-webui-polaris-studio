@@ -1108,19 +1108,37 @@
             ["rise", "傾き", -90, 90, 1, "°", "全体の傾き。プラスで右上がり"],
             ["italic", "斜体", -45, 45, 1, "°", "字を斜めに倒します"],
             ["curve", "曲がり", -100, 100, 1, "%", "並びを弓なりに曲げます。プラスで真ん中がふくらみます"],
+            ["jitter.offset", "字のずれ", 0, 100, 1, "%", "字を並びと直角の向きにずらします。「交互」なら、隣り合う字がちょうどこの割合（字の大きさに対する）ずれ、置くたびに変わりません。「ばらばら」なら字ごとにこの幅の中で決まり、置くたびに変わります"],
         ]],
         ["ゆらぎ（置くたびに変わる幅）", [
             ["jitter.rot", "字の角度", 0, 45, 1, "°", "字ごとに、この角度の範囲で回します"],
             ["jitter.size", "字の大きさ", 0, 60, 1, "%", "字ごとに、この割合の範囲で大きさを変えます"],
-            ["jitter.offset", "字のずれ", 0, 60, 1, "%", "字ごとに、並びと直角の向きにずらします"],
             ["jitter.tilt", "全体の傾き", 0, 30, 1, "°", "全体の傾きを、この角度の範囲で変えます"],
-            ["amount", "ゆらぎの強さ", 0, 200, 5, "%", "上のゆらぎ全部に掛ける強さ。0 でゆらぎなし"],
+            ["amount", "ゆらぎの強さ", 0, 200, 5, "%", "上のゆらぎ全部（と「ばらばら」の字のずれ）に掛ける強さ。0 でゆらぎなし"],
         ]],
         ["塗り・フチ", [
             ["outlines.0.width", "フチ 1", 0, 40, 0.5, "%", "字のすぐ外のフチの太さ（字の大きさに対する割合）。0 でなし"],
             ["outlines.1.width", "フチ 2", 0, 40, 0.5, "%", "フチ 1 のさらに外のフチの太さ。0 でなし"],
         ]],
     ];
+
+    // 選んだ字の手直しのつまみ [設定の名前, 表示, 最小, 最大, 刻み, 単位, 説明]
+    const SFX_GLYPH_FIELDS = [
+        ["x", "左右", -200, 200, 1, "%", "字を並びの横の向きにずらします（字の大きさに対する割合。全体の傾きの前の向き）"],
+        ["y", "上下", -200, 200, 1, "%", "字を並びの縦の向きにずらします（字の大きさに対する割合。全体の傾きの前の向き）"],
+        ["rot", "角度", -180, 180, 1, "°", "字を回します。プラスで時計回り"],
+        ["size", "大きさ", 10, 400, 1, "%", "字の大きさ。100 % でそのまま"],
+    ];
+
+    // i 番目の字の手直し（なければ何も変えない値）
+    const glyphOf = (p, i) => ({x: 0, y: 0, rot: 0, size: 100, ...((p.glyphs || [])[i] || {})});
+
+    function setGlyph(p, i, o) {
+        if (i < 0) return;
+        p.glyphs = (p.glyphs || []).slice();
+        while (p.glyphs.length < i) p.glyphs.push(null);
+        p.glyphs[i] = o;
+    }
 
     function getPath(obj, path) {
         return path.split(".").reduce((o, k) => (o == null ? undefined : o[k]), obj);
@@ -1227,6 +1245,29 @@
                     el("button", {type: "button", class: "mtm-btn", "data-sfx-dir": "v", text: "縦", title: "縦書き"}),
                 ]),
             ]),
+            el("div", {class: "ps-pg-sfx-glyph"}, [
+                el("div", {class: "ps-pg-sfx-row"}, [
+                    el("button", {type: "button", class: "mtm-btn ps-pg-sfx-glyphmode", text: "✥ 字を 1 つずつ直す",
+                        title: "字を 1 つずつ動かす・回す・大きさを変える (E)", onclick: () => toggleVertexMode()}),
+                    el("span", {class: "mtm-fs-spacer"}),
+                    el("button", {type: "button", class: "mtm-btn ps-pg-sfx-glyph-resetall", text: "すべての字を戻す",
+                        title: "字ごとの手直しを全部やめます", onclick: () => editSfx((p) => (p.glyphs = []), true, true)}),
+                ]),
+                el("div", {class: "ps-pg-sfx-glyph-info"}),
+                el("div", {class: "ps-pg-sfx-glyph-fields"}, [
+                    ...SFX_GLYPH_FIELDS.map(([key, label, min, max, step, unit, help]) => el("label", {class: "ps-pg-sfx-field", title: help}, [
+                        el("span", {class: "ps-pg-sfx-name", text: label}),
+                        el("input", {type: "range", min, max, step, "data-sfx-glyph": key}),
+                        el("input", {type: "number", min, max, step, "data-sfx-glyph": key, class: "ps-pg-sfx-num"}),
+                        el("span", {class: "ps-pg-sfx-unit", text: unit}),
+                    ])),
+                    el("div", {class: "ps-pg-sfx-row"}, [
+                        el("span", {class: "mtm-fs-spacer"}),
+                        el("button", {type: "button", class: "mtm-btn ps-pg-sfx-glyph-reset", text: "この字を戻す", title: "選んだ字の手直しをやめます",
+                            onclick: () => editSfx((p) => setGlyph(p, activeGlyph, null), true, true)}),
+                    ]),
+                ]),
+            ]),
             el("div", {class: "ps-pg-sfx-row ps-pg-sfx-presets ps-pg-sfx-apply", title: "ひな形の形・ゆらぎ・塗りに置き換えます（文字・フォント・大きさはそのまま）"},
                 SFX().PRESETS.map((x) => el("button", {type: "button", class: "mtm-btn", text: x.label, title: x.title + "\n（文字・フォント・大きさはそのまま）",
                     onclick: () => editSfx((p) => Object.assign(p, cloneParams(x.params)), true)}))),
@@ -1248,6 +1289,23 @@
                 const v = Number(input.value);
                 if (input.value === "" || !Number.isFinite(v)) return;
                 editSfx((p) => setPath(p, input.dataset.sfx, v), final);
+            };
+            input.addEventListener("input", () => input.type === "range" && apply(false));
+            input.addEventListener("change", () => apply(true));
+            input.addEventListener("keydown", (e) => {
+                if (e.key === "Enter" && !e.isComposing) e.target.blur();
+            });
+        });
+        // 字のずれの付け方（交互・ばらばら）。字のずれのつまみのすぐ下に出す
+        box.querySelector('[data-sfx="jitter.offset"]').closest("label").after(el("div", {class: "ps-pg-sfx-row ps-pg-sfx-zig"},
+            [1, -1, 0].map((z) => el("button", {type: "button", class: "mtm-btn", "data-sfx-zig": z,
+                onclick: () => editSfx((p) => (p.zigzag = z), true)}))));
+        // 選んだ字の手直し
+        box.querySelectorAll("[data-sfx-glyph]").forEach((input) => {
+            const apply = (final) => {
+                const v = Number(input.value);
+                if (input.value === "" || !Number.isFinite(v) || activeGlyph < 0) return;
+                editSfx((p) => setGlyph(p, activeGlyph, {...glyphOf(p, activeGlyph), [input.dataset.sfxGlyph]: v}), final, true);
             };
             input.addEventListener("input", () => input.type === "range" && apply(false));
             input.addEventListener("change", () => apply(true));
@@ -1336,13 +1394,15 @@
     }
 
     // 選んだオノマトペの設定を変える。final でなければ描き直すだけ（つまみを動かしている間）
-    function editSfx(fn, final) {
+    // keep なら（字の手直し）、ほかの字がページの上で動かないよう並びの原点を保つ。でなければ外枠の真ん中を保つ
+    function editSfx(fn, final, keep) {
         const s = selected();
         if (!s || s.type !== "sfx") return;
         if (!sfxBefore) sfxBefore = snapshot();
+        const prev = keep ? {x: s.x, y: s.y, w: s.w, h: s.h, params: cloneParams(s.params)} : null;
         fn(s.params);
         s.params = SFX().clean(s.params);
-        if (!SFX().fit(s)) sfxPending.add(s.id);
+        if (!(keep ? SFX().refit(s, prev) : SFX().fit(s))) sfxPending.add(s.id);
         if (!final) {
             render();
             return;
@@ -1470,6 +1530,29 @@
         if (document.activeElement !== text) text.value = p.text;
         q(".ps-pg-sfx-dfont").textContent = fontName(p.font) + " ▾";
         box.querySelectorAll("[data-sfx-dir]").forEach((b) => b.classList.toggle("mtm-active", (b.dataset.sfxDir === "v") === p.vertical));
+        const zigLabel = {1: p.vertical ? "交互・1 字目を右へ" : "交互・1 字目を上へ", "-1": p.vertical ? "交互・1 字目を左へ" : "交互・1 字目を下へ", 0: "ばらばら"};
+        box.querySelectorAll("[data-sfx-zig]").forEach((b) => {
+            b.textContent = zigLabel[b.dataset.sfxZig];
+            b.title = b.dataset.sfxZig === "0" ? "字ごとに乱数でずらします（置くたびに変わります）" : "隣り合う字を、反対の向きに同じだけずらします";
+            b.classList.toggle("mtm-active", Number(b.dataset.sfxZig) === p.zigzag);
+        });
+        // 字の手直し
+        const chars = Array.from(p.text);
+        if (activeGlyph >= chars.length) activeGlyph = -1;
+        const on = vertexMode && activeGlyph >= 0;
+        q(".ps-pg-sfx-glyphmode").classList.toggle("mtm-active", vertexMode);
+        q(".ps-pg-sfx-glyph-resetall").disabled = !p.glyphs.length;
+        q(".ps-pg-sfx-glyph-info").textContent = !vertexMode ? ""
+            : on ? `${activeGlyph + 1} 文字目「${chars[activeGlyph]}」：ドラッグで移動、上の丸で回転、右下の四角で大きさ。矢印キーで 1 px（Shift で 10 px）`
+            : "直したい字をクリックして選びます。E で終わります";
+        q(".ps-pg-sfx-glyph-fields").classList.toggle("ps-off", !on);
+        if (on) {
+            const g = glyphOf(p, activeGlyph);
+            box.querySelectorAll("[data-sfx-glyph]").forEach((input) => {
+                if (document.activeElement !== input) input.value = Math.round(g[input.dataset.sfxGlyph] * 10) / 10;
+            });
+            q(".ps-pg-sfx-glyph-reset").disabled = !p.glyphs[activeGlyph];
+        }
     }
 
     // 選んだオノマトペの大きさを変える（角のつまみ）。真ん中を保ち、字の大きさごと拡大・縮小する
@@ -1748,18 +1831,20 @@
     }
 
     function select(id) {
-        if (ed.sel !== id) activeVertex = -1;
+        if (ed.sel !== id) activeVertex = activeGlyph = -1;
         ed.sel = id;
         render();
     }
 
     // 頂点の編集。オンの間は、選んだコマの角に丸いつまみを出す（外枠の大きさを変えるつまみの代わり）
+    // オノマトペを選んでいるときは、字を 1 つずつ直す（字の枠を出し、選んだ字に回すつまみと大きさのつまみを出す）
     let vertexMode = false;
     let activeVertex = -1;      // 矢印キーで動かす頂点（最後に触った頂点）
+    let activeGlyph = -1;       // 手直しする字（オノマトペの何文字目か）
 
     function toggleVertexMode() {
         vertexMode = !vertexMode;
-        activeVertex = -1;
+        activeVertex = activeGlyph = -1;
         if (vertexMode && prefs.tool !== "select") setTool("select");
         else if (ed) render();
         refocus();
@@ -1868,7 +1953,9 @@
         if (document.activeElement !== q(".ps-pg-h")) q(".ps-pg-h").value = ed.page.height;
         q(".ps-pg-hint").textContent = prefs.tool === "sfx" && stampSource
             ? `スタンプ「${stampSource.params.text}」：クリックした所に置きます。続けて置けます${prefs.sfxVary ? "（置くたびに形が少し変わります）" : ""}。Esc か V で選択に戻ります。置いたオノマトペは「選択」で選ぶと細かく調整できます。`
-            : HINTS[prefs.tool] || "";
+            : vertexMode && s && s.type === "sfx"
+                ? "字を 1 つずつ直します：字を押して選び、ドラッグで移動（Shift で縦か横だけ）、上の丸で回転（Shift で 15° ずつ）、右下の四角で大きさ。矢印キーで 1 px（Shift で 10 px）。E で終わります。"
+                : HINTS[prefs.tool] || "";
         q(".ps-pg-sfx-toggle").classList.toggle("mtm-active", prefs.sfxOpen);
         q(".ps-pg-sfx").classList.toggle("ps-off", !prefs.sfxOpen || !SFX());
         renderSfxPalette();
@@ -1941,10 +2028,27 @@
             x: x - HANDLE * u / 2, y: y - HANDLE * u / 2, width: HANDLE * u, height: HANDLE * u,
             "data-handle": name, class: "ps-pg-handle ps-pg-handle-" + name,
         });
+        // 字の手直し中のオノマトペは、字ごとの枠
+        const fr = s.type === "sfx" && vertexMode && SFX() ? SFX().frames(s) : null;
         // セリフの大きさは文字の大きさで決まるので、つまみは出さない
         if (s.type === "text") {
             const b = textBox(s);
             g.appendChild(svgEl("rect", {x: b.x, y: b.y, width: b.w, height: b.h, class: "ps-pg-sel-outline"}));
+        } else if (fr) {
+            g.appendChild(svgEl("rect", {x: s.x, y: s.y, width: s.w, height: s.h, class: "ps-pg-sel-outline ps-pg-sel-faint"}));
+            // 選んだ字を最後に描いて、つまみを手前にする
+            const order = fr.glyphs.filter((f) => f.i !== activeGlyph).concat(fr.glyphs.filter((f) => f.i === activeGlyph));
+            for (const f of order) {
+                g.appendChild(svgEl("polygon", {points: pointsAttr(f.pts), "data-handle": "gm" + f.i, class: "ps-pg-glyph" + (f.i === activeGlyph ? " ps-on" : "")}));
+                if (f.i !== activeGlyph) continue;
+                const top = {x: (f.pts[0][0] + f.pts[1][0]) / 2, y: (f.pts[0][1] + f.pts[1][1]) / 2};
+                const knob = {x: top.x + f.up.x * 28 * u, y: top.y + f.up.y * 28 * u};
+                g.appendChild(svgEl("line", {x1: top.x, y1: top.y, x2: knob.x, y2: knob.y, class: "ps-pg-glyph-stick"}));
+                g.appendChild(svgEl("circle", {cx: knob.x, cy: knob.y, r: HANDLE * 0.65 * u, "data-handle": "gr" + f.i, class: "ps-pg-vertex ps-pg-glyph-rot"}));
+                const h = handle("gs" + f.i, f.pts[2][0], f.pts[2][1]);
+                h.classList.add("ps-pg-glyph-size");
+                g.appendChild(h);
+            }
         } else if (s.type === "rect" && vertexMode) {
             const pts = cornersOf(s);
             g.appendChild(svgEl("polygon", {points: pointsAttr(pts), class: "ps-pg-sel-outline"}));
@@ -2057,6 +2161,16 @@
                     activeVertex = Number(drag.handle.slice(1));
                     drag.origPts = cornersOf(selected());
                     render();
+                } else if (drag.handle[0] === "g") {
+                    // 字の手直し。動かし始めの字の位置と設定を覚えておく
+                    activeGlyph = Number(drag.handle.slice(2));
+                    drag.origParams = cloneParams(selected().params);
+                    drag.frames = SFX().frames(selected());
+                    if (!drag.frames) {
+                        drag = null;
+                        return;
+                    }
+                    render();
                 }
             } else if (hit) {
                 drag.kind = "move";
@@ -2164,6 +2278,10 @@
             resizeMaterial(s, o, {x: snapX(p.x), y: snapY(p.y)}, shift);
             return;
         }
+        if (s.type === "sfx" && drag.handle[0] === "g") {
+            dragGlyph(s, p, shift);
+            return;
+        }
         if (s.type === "sfx") {
             resizeSfx(s, o, p);
             return;
@@ -2197,6 +2315,36 @@
         if (o.pts) {
             setPoints(s, o.pts.map((pt) => [l + (pt[0] - o.x) * (r - l) / o.w, t + (pt[1] - o.y) * (b - t) / o.h]));
         }
+    }
+
+    // 字の手直し。gm は字を動かす（Shift で縦か横だけ）、gr は字の真ん中を軸に回す（Shift で 15° ずつ）、gs は大きさを変える
+    function dragGlyph(s, p, shift) {
+        const i = activeGlyph;
+        const f = drag.frames.glyphs[i];
+        if (!f) return;
+        const g = glyphOf(drag.origParams, i);
+        const kind = drag.handle.slice(0, 2);
+        if (kind === "gm") {
+            let dx = p.x - drag.start.x, dy = p.y - drag.start.y;
+            if (shift) Math.abs(dx) >= Math.abs(dy) ? (dy = 0) : (dx = 0);
+            const d = drag.frames.toLocal(dx, dy);
+            g.x += d.x;
+            g.y += d.y;
+        } else if (kind === "gr") {
+            const a0 = Math.atan2(drag.start.y - f.c.y, drag.start.x - f.c.x);
+            const a1 = Math.atan2(p.y - f.c.y, p.x - f.c.x);
+            let rot = g.rot + (a1 - a0) * 180 / Math.PI;
+            rot = ((rot + 540) % 360) - 180;
+            if (shift) rot = Math.round(rot / 15) * 15;
+            g.rot = rot;
+        } else {
+            const d0 = Math.hypot(drag.start.x - f.c.x, drag.start.y - f.c.y) || 1;
+            g.size = clamp(g.size * Math.hypot(p.x - f.c.x, p.y - f.c.y) / d0, 10, 400);
+        }
+        const params = cloneParams(drag.origParams);
+        setGlyph(params, i, g);
+        s.params = SFX().clean(params);
+        SFX().refit(s, {...drag.orig, params: drag.origParams});
     }
 
     // 素材の大きさを変える。角のつまみは反対の角を止めて縦横比を保つ（free なら自由に）。辺のつまみはその向きだけ伸び縮みする。
@@ -2271,6 +2419,17 @@
     function nudge(dx, dy) {
         const s = selected();
         if (!s) return;
+        // 字の手直し中は、選んだ字だけを動かす
+        if (s.type === "sfx" && vertexMode && activeGlyph >= 0) {
+            const fr = SFX().frames(s);
+            if (!fr) return;
+            const d = fr.toLocal(dx, dy);
+            editSfx((p) => {
+                const g = glyphOf(p, activeGlyph);
+                setGlyph(p, activeGlyph, {...g, x: g.x + d.x, y: g.y + d.y});
+            }, true, true);
+            return;
+        }
         change(() => {
             if (floating(s)) {
                 placeMaterial(s, s.x + dx, s.y + dy);

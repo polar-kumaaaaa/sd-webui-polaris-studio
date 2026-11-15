@@ -17,36 +17,41 @@
     //   spacing：字間（%）、rise：全体の傾き（°。プラスで右上がり）、italic：斜体（°）
     //   curve：並びの曲がり（%。プラスで真ん中が上・右にふくらむ）
     //   jitter：ゆらぎの幅。rot は字ごとの角度（°）、size は字ごとの大きさ（%）、offset は並びと直角のずれ（%）、tilt は全体の傾き（°）
-    //   amount：ゆらぎの強さ（%。jitter 全体に掛ける）
+    //   zigzag：字のずれ（jitter.offset）の付け方。1 は交互に、1 字目を右（横書きは上）へ。-1 は 1 字目を左（横書きは下）へ。
+    //     このときのずれは乱数を使わず、隣り合う字がちょうど offset %（字の大きさに対する割合）ずれる。
+    //     0 は字ごとに乱数で決める（はじめの版の動き。それまでに作った形を変えないよう、指定がなければこれ）
+    //   amount：ゆらぎの強さ（%。jitter 全体に掛ける。交互のずれには掛けない）
     //   outlines：フチ。字に近い方から順に、色と太さ（%）
+    //   glyphs：字ごとの手直し。i 番目の字の {x, y（字の大きさに対する %。全体の傾きの前の向き）, rot（°）, size（%）}。なければ null
     const DEFAULTS = {
         text: "ドン", font: "", vertical: false, size: 140,
         sizeStart: 100, sizeEnd: 100, spacing: 0, rise: 0, italic: 0, curve: 0,
-        jitter: {rot: 6, size: 6, offset: 6, tilt: 4}, amount: 100,
+        jitter: {rot: 6, size: 6, offset: 6, tilt: 4}, zigzag: 1, amount: 100,
         fill: "#000000", outlines: [{color: "#ffffff", width: 8}],
-        seed: 1,
+        glyphs: [], seed: 1,
     };
+    const GLYPHS_MAX = 32;
 
     // ひな形。文字・フォント・大きさ以外の設定
     const PRESETS = [
         {key: "impact", label: "衝撃", title: "ドン・バン など。だんだん大きく、右上がりに勢いよく",
             params: {vertical: false, sizeStart: 80, sizeEnd: 125, spacing: -6, rise: 8, italic: 10, curve: 0,
-                jitter: {rot: 10, size: 12, offset: 8, tilt: 6}, fill: "#000000", outlines: [{color: "#ffffff", width: 10}]}},
+                jitter: {rot: 10, size: 12, offset: 8, tilt: 6}, zigzag: 1, fill: "#000000", outlines: [{color: "#ffffff", width: 10}]}},
         {key: "rumble", label: "地響き", title: "ゴゴゴ・ズズズ など。重く、上下に細かく揺れる",
             params: {vertical: false, sizeStart: 100, sizeEnd: 100, spacing: 4, rise: 0, italic: 0, curve: 0,
-                jitter: {rot: 6, size: 6, offset: 14, tilt: 3}, fill: "#000000", outlines: [{color: "#ffffff", width: 7}, {color: "#000000", width: 4}]}},
+                jitter: {rot: 6, size: 6, offset: 14, tilt: 3}, zigzag: 1, fill: "#000000", outlines: [{color: "#ffffff", width: 7}, {color: "#000000", width: 4}]}},
         {key: "slash", label: "斬撃", title: "ザッ・シュッ など。強く傾け、尾を引くように小さく",
             params: {vertical: false, sizeStart: 130, sizeEnd: 70, spacing: -10, rise: 16, italic: 24, curve: 0,
-                jitter: {rot: 4, size: 5, offset: 3, tilt: 5}, fill: "#000000", outlines: [{color: "#ffffff", width: 8}]}},
+                jitter: {rot: 4, size: 5, offset: 3, tilt: 5}, zigzag: 1, fill: "#000000", outlines: [{color: "#ffffff", width: 8}]}},
         {key: "soft", label: "やわらか", title: "ふわっ・ぽよん など。白抜きで、ゆるく弾む",
             params: {vertical: false, sizeStart: 100, sizeEnd: 100, spacing: 0, rise: 0, italic: 0, curve: 25,
-                jitter: {rot: 12, size: 10, offset: 10, tilt: 8}, fill: "#ffffff", outlines: [{color: "#000000", width: 5}]}},
+                jitter: {rot: 12, size: 10, offset: 10, tilt: 8}, zigzag: 1, fill: "#ffffff", outlines: [{color: "#000000", width: 5}]}},
         {key: "quiet", label: "静けさ", title: "シーン・しん など。縦に間をあけて、ほとんど揺らさない",
             params: {vertical: true, sizeStart: 100, sizeEnd: 100, spacing: 30, rise: 0, italic: 0, curve: 0,
-                jitter: {rot: 1, size: 0, offset: 1, tilt: 0}, fill: "#000000", outlines: []}},
+                jitter: {rot: 1, size: 0, offset: 1, tilt: 0}, zigzag: 1, fill: "#000000", outlines: []}},
         {key: "pop", label: "ポップ", title: "キラッ・パッ など。白い字に黒と白の二重フチ",
             params: {vertical: false, sizeStart: 95, sizeEnd: 110, spacing: -4, rise: 6, italic: 0, curve: 15,
-                jitter: {rot: 15, size: 14, offset: 10, tilt: 6}, fill: "#ffffff", outlines: [{color: "#000000", width: 6}, {color: "#ffffff", width: 6}]}},
+                jitter: {rot: 15, size: 14, offset: 10, tilt: 6}, zigzag: 1, fill: "#ffffff", outlines: [{color: "#000000", width: 6}, {color: "#ffffff", width: 6}]}},
     ];
 
     const clamp = (v, lo, hi) => Math.min(Math.max(v, lo), hi);
@@ -73,12 +78,27 @@
                 rot: num(j.rot, 0, 90, D.jitter.rot), size: num(j.size, 0, 80, D.jitter.size),
                 offset: num(j.offset, 0, 100, D.jitter.offset), tilt: num(j.tilt, 0, 45, D.jitter.tilt),
             },
+            zigzag: p.zigzag === 1 || p.zigzag === -1 ? p.zigzag : 0,
             amount: num(p.amount, 0, 300, D.amount),
             fill: color(p.fill, D.fill),
             outlines: Array.from((Array.isArray(p.outlines) ? p.outlines : D.outlines).slice(0, 3),
                 (o) => ({color: color(o && o.color, "#ffffff"), width: num(o && o.width, 0, 60, 0)})),
+            glyphs: cleanGlyphs(p.glyphs),
             seed: Math.floor(num(p.seed, 0, 2147483647, 1)),
         };
+    }
+
+    // 字ごとの手直し。何も変えていない字は null にし、後ろの null は詰める
+    function cleanGlyphs(list) {
+        if (!Array.isArray(list)) return [];
+        const out = Array.from(list.slice(0, GLYPHS_MAX), (g) => {
+            if (!g || typeof g !== "object") return null;
+            const r = (v) => Math.round(v * 10) / 10;
+            const o = {x: r(num(g.x, -500, 500, 0)), y: r(num(g.y, -500, 500, 0)), rot: r(num(g.rot, -180, 180, 0)), size: r(num(g.size, 10, 400, 100))};
+            return o.x || o.y || o.rot || o.size !== 100 ? o : null;
+        });
+        while (out.length && !out[out.length - 1]) out.pop();
+        return out;
     }
 
     const randomSeed = () => Math.floor(Math.random() * 2147483647);
@@ -145,18 +165,30 @@
         const length = Math.max(cursor, 1);
         const tilt = r();
         const c = p.curve / 100;
-        for (const it of items) {
+        items.forEach((it, i) => {
             const u = it.at / length;
             // 並びの曲がり（放物線）。真ん中が length * c / 2 だけふくらむ
             const bend = -c * length / 2 * (1 - (2 * u - 1) ** 2);
             const slope = Math.atan(c * 2 * (2 * u - 1)) * 180 / Math.PI;
-            const off = bend + p.jitter.offset / 100 * k * it.scale * it.ro;
+            // 字のずれ。交互なら、隣り合う字がちょうど offset % ずれる（マイナスが縦書きの右・横書きの上）
+            const shift = p.zigzag
+                ? -p.zigzag * (i % 2 ? -1 : 1) * p.jitter.offset / 100 * base / 2
+                : p.jitter.offset / 100 * k * it.scale * it.ro;
+            const off = bend + shift;
             const along = it.at - length / 2;
             it.x = p.vertical ? -off : along;
             it.y = p.vertical ? along : off;
             it.rot = (p.vertical ? -slope : slope) + p.jitter.rot * k * it.rr;
             it.turn = p.vertical && ROTATE.includes(it.ch);
-        }
+            // 字ごとの手直し
+            const o = p.glyphs[i];
+            if (o) {
+                it.x += o.x / 100 * base;
+                it.y += o.y / 100 * base;
+                it.rot += o.rot;
+                it.scale *= o.size / 100;
+            }
+        });
         const angle = -(p.rise + p.jitter.tilt * k * tilt);
         // 外枠。字の枠（em）の四隅を変換して求める
         const pad = p.outlines.reduce((a, o) => a + o.width, 0) / 100 * base + base * 0.06;
@@ -212,7 +244,55 @@
             return null;
         }
         const lay = layout(p);
-        return {w: lay.box.w, h: lay.box.h, svg: markup(p, lay)};
+        return {w: lay.box.w, h: lay.box.h, ox: -lay.box.x, oy: -lay.box.y, svg: markup(p, lay)};
+    }
+
+    // 置いたオノマトペの字ごとの位置（ページの座標）。字の手直しに使う。輪郭がまだなら null
+    //   glyphs[i]：c（字の真ん中）、pts（字の枠の四隅）、up（字の上向きの単位ベクトル）、half（字の枠の半分の高さ）
+    //   toLocal(dx, dy)：ページでの動きを、手直しの x・y（%）の動きに直す
+    function frames(shape) {
+        const p = clean(shape.params);
+        if (!ready(p)) {
+            load(p);
+            return null;
+        }
+        const lay = layout(p);
+        const sx = shape.w / lay.box.w, sy = shape.h / lay.box.h;
+        const rad = lay.angle * Math.PI / 180;
+        const cos = Math.cos(rad), sin = Math.sin(rad);
+        const toPage = (x, y) => ({x: shape.x + sx * (x * cos - y * sin - lay.box.x), y: shape.y + sy * (x * sin + y * cos - lay.box.y)});
+        const skew = Math.tan(p.italic * Math.PI / 180);
+        const glyphs = lay.items.map((it, i) => {
+            const hw = (it.turn ? 500 : it.g.adv / 2) / 1000 * it.scale, hh = (it.turn ? it.g.adv / 2 : 500) / 1000 * it.scale;
+            const a = it.rot * Math.PI / 180;
+            const at = (lx, ly) => {
+                const kx = lx - ly * skew;
+                return toPage(it.x + kx * Math.cos(a) - ly * Math.sin(a), it.y + kx * Math.sin(a) + ly * Math.cos(a));
+            };
+            const c = toPage(it.x, it.y);
+            const top = at(0, -hh);
+            const len = Math.hypot(top.x - c.x, top.y - c.y) || 1;
+            return {i, ch: it.ch, c, pts: [at(-hw, -hh), at(hw, -hh), at(hw, hh), at(-hw, hh)].map((q) => [q.x, q.y]),
+                up: {x: (top.x - c.x) / len, y: (top.y - c.y) / len}, half: len};
+        });
+        const toLocal = (dx, dy) => {
+            const x = dx / sx, y = dy / sy;
+            return {x: (x * cos + y * sin) / lay.base * 100, y: (-x * sin + y * cos) / lay.base * 100};
+        };
+        return {glyphs, toLocal};
+    }
+
+    // 字の手直しのあと、ほかの字がページの上で動かないよう、並びの原点を prev（変える前の形）と同じ所に保って枠を合わせる
+    function refit(shape, prev) {
+        const b0 = build(prev.params), b = build(shape.params);
+        if (!b0 || !b) return fit(shape);
+        const sx = prev.w / b0.w, sy = prev.h / b0.h;
+        const ox = prev.x + b0.ox * sx, oy = prev.y + b0.oy * sy;
+        shape.w = Math.round(b.w * sx * 10) / 10;
+        shape.h = Math.round(b.h * sy * 10) / 10;
+        shape.x = Math.round((ox - b.ox * sx) * 10) / 10;
+        shape.y = Math.round((oy - b.oy * sy) * 10) / 10;
+        return true;
     }
 
     // ページの SVG に置く <g>。x, y, w, h の枠に合わせる
@@ -302,7 +382,7 @@
     }
 
     window.PolarisSfx = {
-        DEFAULTS, PRESETS, clean, randomSeed, load, ready: (p) => ready(clean(p)), build, node, preview, fit,
+        DEFAULTS, PRESETS, clean, randomSeed, load, ready: (p) => ready(clean(p)), build, node, preview, fit, frames, refit,
         keyOf, stale, bake, rasterize, onLoad: (f) => listeners.add(f),
     };
 })();
