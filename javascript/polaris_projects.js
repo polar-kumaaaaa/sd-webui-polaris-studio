@@ -1796,16 +1796,21 @@
         await saveProjects();
     }
 
-    async function deleteBook() {
+    // プロジェクトの削除と同じく、DELETE と入力しないと削除できない（コマページの作業はマウスの押し間違いで失うと大きい）
+    function deleteBook() {
         const book = bookOf(bookId);
         if (!book) return;
+        const p = project;
         const pages = pageItems(book).length;
-        const pageNote = pages ? `\nコマページ ${pages} 枚は Book と一緒に消えます。` : "";
-        if (!confirm(`Book「${book.title}」を削除しますか？\nコマにはめ込んだ画像は削除されません。${pageNote}`)) return;
-        project.books.splice(project.books.indexOf(book), 1);
-        bookId = (project.books[0] || {}).id || "";
-        renderBooks();
-        await saveProjects();
+        const pageNote = pages ? `\n⚠ コマページ ${pages} 枚も一緒に削除されます。` : "";
+        askDelete(`Book「${book.title}」を削除`, `Book を削除します。コマにはめ込んだ画像は削除されません。Book の内容は data/backups/ に控えが残ります。${pageNote}`, "", async () => {
+            const i = (p.books || []).indexOf(book);
+            if (i < 0) return;
+            p.books.splice(i, 1);
+            if (project === p && bookId === book.id) bookId = (p.books[0] || {}).id || "";
+            renderBooks();
+            await saveProjects();
+        }, DELETE_WORD);
     }
 
     // メタ情報を落とした PNG を、Book 内の順序（001.png …）をファイル名にして ZIP で保存する
@@ -2708,6 +2713,7 @@
         q(".ps-delete-title").textContent = title;
         q(".ps-delete-text").textContent = text;
         q(".ps-delete-path").textContent = path;
+        q(".ps-delete-path").classList.toggle("ps-off", !path);
         pendingDelete = run;
         deleteWord = word;
         const input = q(".ps-delete-word");
