@@ -494,7 +494,7 @@
             </div>
             <div class="ps-pg-fontpicker ps-off">
                 <div class="ps-pg-fontpicker-head">
-                    <input type="search" class="ps-pg-fontsearch" placeholder="フォントの名前で検索（Enter で一番上を選ぶ）">
+                    <input type="search" class="ps-pg-fontsearch" placeholder="名前で検索（↑↓ で試す、Enter で決める、Esc で戻す）" title="↑↓ キーでフォントを順に試せます（選んだオノマトペやセリフにすぐ当たります）。Enter で決め、Esc で試す前のフォントに戻します。検索のあとすぐ Enter なら一番上を選びます">
                     <button type="button" class="mtm-icon ps-pg-fontpicker-close" title="閉じる (Esc)">✕</button>
                 </div>
                 <div class="ps-pg-group ps-pg-fontfilters">
@@ -715,10 +715,24 @@
         const picker = q(".ps-pg-fontpicker");
         q(".ps-pg-font").addEventListener("click", (e) => (isFontPickerOpen() ? closeFontPicker() : openFontPicker(e.currentTarget, "text")));
         q(".ps-pg-fontpicker-close").addEventListener("click", closeFontPicker);
-        q(".ps-pg-fontsearch").addEventListener("input", renderFontList);
+        q(".ps-pg-fontsearch").addEventListener("input", () => {
+            fontCursor = false;
+            renderFontList();
+        });
         q(".ps-pg-fontsearch").addEventListener("keydown", (e) => {
-            if (e.key !== "Enter" || e.isComposing) return;
+            if (e.isComposing) return;
+            if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+                e.preventDefault();
+                stepFont(e.key === "ArrowDown" ? 1 : -1);
+                return;
+            }
+            if (e.key !== "Enter") return;
             e.preventDefault();
+            // 上下キーで選んでいたら、それで決める。でなければ一番上
+            if (fontCursor) {
+                closeFontPicker();
+                return;
+            }
             const first = q(".ps-pg-fontlist [data-font]");
             if (first) pickFont(first.dataset.font);
         });
@@ -737,9 +751,78 @@
     // target はフォントを決める先。"text"（セリフ）、"sfx-new"（文字列のスタンプ）、"sfx"（選んだオノマトペ）
     let fontTarget = "text";
 
+    // 上下キーでフォントを次々に試す。試している間は描き直すだけにし、閉じたときに 1 回の変更にする（元に戻すで、試す前に戻る）
+    let fontCursor = false;     // 検索のあとに上下キーで選んだか（Enter でそれに決める）
+    let fontBrowse = null;      // {before（試す前のページ）, orig（試す前のフォント）, id（いま試しているフォント）}
+
+    function stepFont(dir) {
+        const buttons = [...view.querySelectorAll(".ps-pg-fontlist [data-font]")];
+        if (!buttons.length) return;
+        const cur = currentFont();
+        const at = buttons.findIndex((b) => b.dataset.font === cur);
+        const next = at < 0 ? (dir > 0 ? 0 : buttons.length - 1) : clamp(at + dir, 0, buttons.length - 1);
+        const id = buttons[next].dataset.font;
+        fontCursor = true;
+        if (id !== cur) tryFont(id);
+        view.querySelectorAll(".ps-pg-fontrow").forEach((r) => r.classList.toggle("ps-on", !!r.querySelector(`[data-font="${CSS.escape(id)}"]`)));
+        buttons[next].closest(".ps-pg-fontrow").scrollIntoView({block: "nearest"});
+    }
+
+    function tryFont(id) {
+        if (!fontBrowse) {
+            fontBrowse = {before: textEdit || fontTarget === "sfx-new" ? null : snapshot(), orig: currentFont(), id};
+        }
+        fontBrowse.id = id;
+        applyFontLive(id);
+    }
+
+    // 変更として残さずにフォントを当てる
+    function applyFontLive(id) {
+        const s = selected();
+        if (fontTarget === "sfx-new") {
+            prefs.sfxFont = id;
+            savePrefs();
+            renderSfxPalette();
+        } else if (fontTarget === "sfx") {
+            if (!s || s.type !== "sfx") return;
+            s.params.font = id;
+            s.params = SFX().clean(s.params);
+            if (!SFX().fit(s)) sfxPending.add(s.id);
+            render();
+        } else {
+            prefs.text.font = id;
+            savePrefs();
+            if (s && s.type === "text") {
+                s.font = id;
+                fitText(s);
+                render();
+            } else {
+                updateTools();
+            }
+        }
+    }
+
+    // 試していたフォントを決める（keep）か、試す前に戻す
+    function finishFontBrowse(keep) {
+        const b = fontBrowse;
+        fontBrowse = null;
+        fontCursor = false;
+        if (!b) return;
+        if (!keep) applyFontLive(b.orig);
+        else useFont(b.id);
+        if (b.before && snapshot() !== b.before) {
+            pushUndo(b.before);
+            commit();
+        } else if (ed) {
+            render();
+        }
+    }
+
     function openFontPicker(anchor, target) {
+        finishFontBrowse(true);
         loadFonts();
         fontTarget = target;
+        fontCursor = false;
         const picker = q(".ps-pg-fontpicker");
         const r = anchor.getBoundingClientRect();
         picker.classList.remove("ps-off");
@@ -753,8 +836,10 @@
         search.select();
     }
 
-    function closeFontPicker() {
+    // keep が false なら（Esc）、上下キーで試していたフォントを試す前に戻す
+    function closeFontPicker(keep) {
         if (!view || !isFontPickerOpen()) return;
+        finishFontBrowse(keep !== false);
         q(".ps-pg-fontpicker").classList.add("ps-off");
         if (textEdit) q(".ps-pg-textarea").focus();
         else refocus();
@@ -2464,7 +2549,7 @@
         if (isFontPickerOpen()) {
             if (e.key === "Escape") {
                 stop();
-                closeFontPicker();
+                closeFontPicker(false);
             }
             return;
         }
