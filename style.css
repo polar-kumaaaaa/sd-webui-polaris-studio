@@ -2533,7 +2533,8 @@ body.mtm-fs-open {
 
 .ps-pg-sfx-stamps {
     display: grid;
-    grid-template-columns: repeat(3, 1fr);
+    /* minmax(0, …) で、中身（長いフォント名など）があっても列の幅をそろえる */
+    grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 6px;
 }
 
@@ -2543,6 +2544,7 @@ body.mtm-fs-open {
 
 .ps-pg-sfx-stamp {
     position: relative;
+    min-width: 0;
 }
 
 .ps-pg-sfx-stamp-pick {

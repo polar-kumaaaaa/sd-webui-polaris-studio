@@ -1182,6 +1182,12 @@
     const kanaOrder = new Intl.Collator("ja", {numeric: true});
     const sortWords = (text) => [...new Set(text.split(/\r?\n/).map((w) => w.trim()).filter(Boolean))].sort(kanaOrder.compare);
     const sfxWords = () => sortWords(sfxLib.words);
+    // 調整済みスタンプの下に出すフォント名の長さ（超えたら … で切る。全部は指を乗せると見える）
+    const STAMP_FONT_CHARS = 12;
+    const shortText = (s, n) => {
+        const chars = [...s];
+        return chars.length > n ? chars.slice(0, n - 1).join("") + "…" : s;
+    };
     const sortedStamps = () => sfxLib.stamps.slice().sort((a, b) => kanaOrder.compare(a.params.text || "", b.params.text || ""));
     const isSfxOpen = () => view && !q(".ps-pg-sfx").classList.contains("ps-off");
     const presetOf = (key) => SFX().PRESETS.find((x) => x.key === key) || SFX().PRESETS[0];
@@ -1597,7 +1603,7 @@
                     type: "button", class: "ps-pg-sfx-stamp-pick", title: `「${st.params.text}」を置きます。クリックした所に続けて置けます`,
                     onclick: () => (active("stamp", st.id) ? setTool("select") : startStamp("stamp", st.id)),
                 }, [SFX().preview(st.params)]),
-                el("div", {class: "ps-pg-sfx-stamp-font", text: fontName(st.params.font), title: fontName(st.params.font)}),
+                el("div", {class: "ps-pg-sfx-stamp-font", text: shortText(fontName(st.params.font), STAMP_FONT_CHARS), title: fontName(st.params.font)}),
                 el("button", {type: "button", class: "mtm-icon ps-pg-sfx-stamp-del", text: "✕", title: "パレットから外す", onclick: () => deleteStamp(st.id)}),
             ]);
             stamps.appendChild(item);
