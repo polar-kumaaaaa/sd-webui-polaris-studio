@@ -1178,7 +1178,11 @@
     let sfxPaletteSig = "";     // パレットを最後に作ったときの中身（同じなら作り直さない）
     let sfxLoads = 0;           // 字形が届いた回数（見本を描き直すため）
 
-    const sfxWords = () => [...new Set(sfxLib.words.split(/\r?\n/).map((w) => w.trim()).filter(Boolean))];
+    // 文字列と調整済みスタンプは 50 音順に並べる（ひらがなとカタカナは同じ音として並ぶ）
+    const kanaOrder = new Intl.Collator("ja", {numeric: true});
+    const sortWords = (text) => [...new Set(text.split(/\r?\n/).map((w) => w.trim()).filter(Boolean))].sort(kanaOrder.compare);
+    const sfxWords = () => sortWords(sfxLib.words);
+    const sortedStamps = () => sfxLib.stamps.slice().sort((a, b) => kanaOrder.compare(a.params.text || "", b.params.text || ""));
     const isSfxOpen = () => view && !q(".ps-pg-sfx").classList.contains("ps-off");
     const presetOf = (key) => SFX().PRESETS.find((x) => x.key === key) || SFX().PRESETS[0];
     const cloneParams = (p) => JSON.parse(JSON.stringify(p));
@@ -1535,7 +1539,7 @@
     function finishWordEdit(accept) {
         if (q(".ps-pg-sfx-wordedit").classList.contains("ps-off")) return;
         if (accept) {
-            sfxLib.words = q(".ps-pg-sfx-textarea").value.replace(/\r\n/g, "\n");
+            sfxLib.words = sortWords(q(".ps-pg-sfx-textarea").value).join("\n");
             saveSfxLibrary();
         }
         q(".ps-pg-sfx-wordedit").classList.add("ps-off");
@@ -1587,7 +1591,7 @@
         if (!sfxLib.stamps.length) {
             stamps.appendChild(el("div", {class: "mtm-empty", text: "置いたオノマトペを選んで調整し、「＋ 調整済みに登録」で登録すると、ここから置けます。"}));
         }
-        for (const st of sfxLib.stamps) {
+        for (const st of sortedStamps()) {
             const item = el("div", {class: "ps-pg-sfx-stamp" + (active("stamp", st.id) ? " ps-on" : "")}, [
                 el("button", {
                     type: "button", class: "ps-pg-sfx-stamp-pick", title: `「${st.params.text}」を置きます。クリックした所に続けて置けます`,
