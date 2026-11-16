@@ -1597,6 +1597,7 @@
                     type: "button", class: "ps-pg-sfx-stamp-pick", title: `「${st.params.text}」を置きます。クリックした所に続けて置けます`,
                     onclick: () => (active("stamp", st.id) ? setTool("select") : startStamp("stamp", st.id)),
                 }, [SFX().preview(st.params)]),
+                el("div", {class: "ps-pg-sfx-stamp-font", text: fontName(st.params.font), title: fontName(st.params.font)}),
                 el("button", {type: "button", class: "mtm-icon ps-pg-sfx-stamp-del", text: "✕", title: "パレットから外す", onclick: () => deleteStamp(st.id)}),
             ]);
             stamps.appendChild(item);
