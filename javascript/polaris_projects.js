@@ -284,6 +284,7 @@
                     <button type="button" class="mtm-btn ps-view-fav" title="お気に入りにする・外す (F)">♡ お気に入り</button>
                     <button type="button" class="mtm-btn ps-view-key">キー画像に指定</button>
                     <button type="button" class="mtm-btn ps-view-restore" title="この画像の生成情報のプロンプトをカット案に戻す">プロンプトを戻す</button>
+                    <button type="button" class="mtm-btn ps-view-img2img" title="WebUI の img2img に送る。生成した画像はこのカット案に保存される">img2img に送る</button>
                     <button type="button" class="mtm-btn ps-view-i2i" title="WebUI のインペイントに送る。生成した画像はこのカット案に保存される">インペイントに送る</button>
                     <button type="button" class="mtm-btn mtm-danger ps-view-delete">削除</button>
                     <button type="button" class="mtm-btn ps-view-info">情報</button>
@@ -401,7 +402,8 @@
         q(".ps-view-fav").addEventListener("click", toggleViewFavorite);
         q(".ps-view-key").addEventListener("click", () => setKeyImage(viewCut, viewImage.name));
         q(".ps-view-restore").addEventListener("click", restorePromptFromImage);
-        q(".ps-view-i2i").addEventListener("click", sendToImg2img);
+        q(".ps-view-img2img").addEventListener("click", () => sendToImg2img("img2img"));
+        q(".ps-view-i2i").addEventListener("click", () => sendToImg2img("inpaint"));
         q(".ps-view-delete").addEventListener("click", () => askDeleteImages([selKey(viewCut, viewImage.name)], "画像を削除"));
         q(".ps-view-info").addEventListener("click", () => {
             setViewerInfo(q(".ps-viewer-info").classList.contains("ps-off"));
@@ -2612,10 +2614,17 @@
         await saveProjects();
     }
 
-    // ---------- i2i（インペイント） ----------
-    // ビューワーの画像を WebUI のインペイントに送る。そこで生成した画像は、解除するまで元のカット案のフォルダに保存する
+    // ---------- i2i（img2img・インペイント） ----------
+    // ビューワーの画像を WebUI の img2img かインペイントに送る。そこで生成した画像は、解除するまで元のカット案のフォルダに保存する
 
-    async function sendToImg2img() {
+    // 送り先 {img2img の中のタブに切り替える関数, 画像欄, 表示名}
+    const I2I_MODES = {
+        img2img: {open: () => switch_to_img2img(), box: "#img2img_image", label: "img2img"},
+        inpaint: {open: () => switch_to_inpaint(), box: "#img2maskimg", label: "インペイント"},
+    };
+
+    async function sendToImg2img(mode) {
+        const m = I2I_MODES[mode] || I2I_MODES.inpaint;
         const image = viewImage;
         const cut = viewCut;
         let target;
@@ -2623,13 +2632,13 @@
             const res = await fetch(imageUrl(project, cut, image, false));
             if (!res.ok) throw new Error(res.status);
             const blob = await res.blob();
-            switch_to_inpaint();
-            const box = gradioApp().querySelector("#img2maskimg");
+            m.open();
+            const box = gradioApp().querySelector(m.box);
             const clear = box && box.querySelector("button[aria-label='Clear'], button[aria-label='Remove Image']");
             if (clear) clear.click();
             await new Promise((resolve) => setTimeout(resolve, 200));
             const input = box && box.querySelector("input[type=file]");
-            if (!input) throw new Error("インペイントの画像欄が見つかりません");
+            if (!input) throw new Error(`${m.label}の画像欄が見つかりません`);
             const files = new DataTransfer();
             files.items.add(new File([blob], image.name, {type: blob.type || "image/png"}));
             input.files = files.files;
@@ -2647,7 +2656,7 @@
             })).target;
         } catch (e) {
             console.error("[Polaris Studio] send to img2img failed", e);
-            alert("インペイントに送れませんでした。\n" + e);
+            alert(`${m.label}に送れませんでした。\n` + e);
             return;
         }
         renderI2iBanner(target);

@@ -1340,7 +1340,7 @@
         }
     }
 
-    // インペイントに送るときに、プロンプトと出力サイズを img2img に転記する
+    // img2img・インペイントに送るときに、プロンプトと出力サイズを img2img に転記する
     function writeImg2img(values) {
         const tab = "img2img";
         const pos = promptArea(tab, false);
