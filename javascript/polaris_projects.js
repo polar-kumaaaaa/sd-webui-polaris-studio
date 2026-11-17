@@ -153,7 +153,7 @@
                             <button type="button" class="mtm-btn mtm-primary ps-book-export" title="メタ情報を落とした PNG を、Book 内の順序をファイル名にして ZIP で保存します">ZIP で書き出し</button>
                             <button type="button" class="mtm-btn mtm-danger ps-book-delete" title="Book だけを削除します。画像は削除しません">Book を削除</button>
                         </div>
-                        <div class="ps-book-hint">クリックでコマページの編集画面を開き、ドラッグで並べ替えます。コマを選んで「画像を選ぶ」から、カット案 → そのカット案の画像の順にはめ込む画像を選びます。✕ はコマページの削除で、画像は削除しません。</div>
+                        <div class="ps-book-hint">クリックでコマページの編集画面を開き、ドラッグで並べ替えます。コマを選んで「画像を選ぶ」から、カット案 → そのカット案の画像の順にはめ込む画像を選びます。⧉ はコマページの複製（すぐ後ろに足します）、✕ はコマページの削除で、画像は削除しません。</div>
                         <div class="ps-book-pages"></div>
                     </div>
                 </div>
@@ -1664,8 +1664,10 @@
                 }),
                 no,
                 el("span", {class: "ps-book-cut", text: "コマページ"}),
+                el("button", {type: "button", class: "mtm-icon ps-book-dup", title: "コマページを複製（すぐ後ろに同じ中身のコマページを足します）", text: "⧉", onclick: () => duplicatePage(book, r)}),
                 el("button", {type: "button", class: "mtm-icon ps-book-remove", title: "コマページを削除（画像は削除しません）", text: "✕", onclick: () => deletePage(book, r)}),
             ]);
+            if (r.id === bookDupNew) page.classList.add("ps-book-dup-new");
             page.addEventListener("click", (e) => {
                 if (!e.target.closest("button")) openPageEditor(book, r);
             });
@@ -1716,6 +1718,28 @@
         book.items.push(page);
         renderBooks();
         openPageEditor(book, page);
+        await saveProjects();
+    }
+
+    // 複製したコマページ（少しの間、枠を付けて目立たせる）
+    let bookDupNew = "";
+    let bookDupTimer = null;
+
+    // コマページを複製して、すぐ後ろに足す。図形もはめ込んだ画像の参照も同じにし、id だけ新しくする
+    async function duplicatePage(book, page) {
+        const copy = JSON.parse(JSON.stringify(page));
+        copy.id = newId();
+        for (const s of copy.shapes || []) s.id = newId();
+        book.items.splice(book.items.indexOf(page) + 1, 0, copy);
+        bookDupNew = copy.id;
+        clearTimeout(bookDupTimer);
+        bookDupTimer = setTimeout(() => {
+            bookDupNew = "";
+            document.querySelectorAll(".ps-book-dup-new").forEach((x) => x.classList.remove("ps-book-dup-new"));
+        }, 1600);
+        renderBooks();
+        const tile = q(".ps-book-dup-new");
+        if (tile) tile.scrollIntoView({block: "nearest"});
         await saveProjects();
     }
 

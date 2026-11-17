@@ -2324,6 +2324,21 @@ body.mtm-fs-open {
     color: #fff;
 }
 
+/* 複製のボタンは削除の左に並べる */
+#mtm-fs .ps-book-dup {
+    position: absolute;
+    right: 34px;
+    top: 4px;
+    background: rgba(0, 0, 0, 0.55);
+    color: #fff;
+}
+
+/* 複製したばかりのコマページ */
+.ps-book-page.ps-book-dup-new {
+    outline: 3px solid var(--color-accent);
+    outline-offset: 2px;
+}
+
 /* ---------- コマページ（polaris_pages.js） ---------- */
 
 .ps-book-komapage {
