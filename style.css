@@ -1735,6 +1735,25 @@ body.mtm-fs-open {
     line-height: 18px;
 }
 
+/* カット案のカードの左上：お気に入りの枚数とコマで使っている画像の枚数 */
+.ps-cut-marks {
+    position: absolute;
+    left: 6px;
+    top: 6px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 3px;
+    max-width: calc(100% - 46px);
+}
+
+.ps-cut-marks.ps-off {
+    display: none;
+}
+
+.ps-cut-marks .ps-thumb-panel {
+    gap: 3px;
+}
+
 .ps-qp-head {
     display: flex;
     align-items: center;

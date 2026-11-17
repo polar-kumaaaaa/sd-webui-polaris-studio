@@ -849,7 +849,30 @@
             el("button", {type: "button", class: "ps-key-pick", title: "キー画像を変更", text: "🖼", onclick: () => openKeyDialog(cut)}),
             el("span", {class: "ps-count", text: `${list.indexOf(image) + 1} / ${list.length}`}),
             makeSelBadge(cut),
+            makeCutMarks(cut),
         ]);
+    }
+
+    // カードの左上に、お気に入りの枚数と、コマで使っている（どれかの Book のコマにはめ込んだ）画像の枚数を出す。0 なら出さない
+    function makeCutMarks(cut) {
+        const names = imagesOf(project, cut).map((image) => image.name);
+        const fav = names.filter((name) => isFavorite(cut, name)).length;
+        const used = new Set((project.books || []).flatMap((b) => [...bookKeys(b)]));
+        const panel = names.filter((name) => used.has(selKey(cut, name))).length;
+        const marks = [];
+        if (fav) marks.push(el("span", {class: "ps-thumb-fav", title: `お気に入り ${fav} 枚`, text: `♥ ${fav}`}));
+        if (panel) {
+            const mark = panelMark([]);
+            mark.title = `コマで使用中の画像 ${panel} 枚`;
+            mark.appendChild(document.createTextNode(String(panel)));
+            marks.push(mark);
+        }
+        return el("span", {class: "ps-cut-marks" + (marks.length ? "" : " ps-off")}, marks);
+    }
+
+    function updateCutMarks(cut) {
+        const marks = root.querySelector(`.ps-cut[data-cut="${cut.id}"] .ps-cut-marks`);
+        if (marks) marks.replaceWith(makeCutMarks(cut));
     }
 
     // サムネイル一覧で選んだ画像の枚数。一覧を閉じても、別のカット案を開いても、選択はカードに残して見せる
@@ -1139,6 +1162,7 @@
         if (isFavorite(cut, name)) cut.favorites = cut.favorites.filter((x) => x !== name);
         else cut.favorites.push(name);
         if (isOpen(".ps-gallery-view") && galleryCut === cut) renderGallery();
+        updateCutMarks(cut);
         await saveProjects();
     }
 
