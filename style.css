@@ -2766,6 +2766,55 @@ body.mtm-fs-open {
     opacity: 1;
 }
 
+/* オノマトペの調整：フォント別の見本 */
+.ps-pg-sfx-fonts {
+    margin: 4px 0;
+    padding: 6px;
+    border: 1px solid var(--border-color-primary);
+    border-radius: 6px;
+}
+
+.ps-pg-sfx-fonts-toggle {
+    padding: 0;
+    border: none;
+    background: none;
+    color: var(--body-text-color);
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+#mtm-fs .ps-pg-sfx-fonts-restore {
+    padding: 1px 6px;
+    font-size: 11px;
+}
+
+.ps-pg-sfx-fonts-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 6px;
+    margin-top: 6px;
+    max-height: 340px;
+    overflow-y: auto;
+}
+
+.ps-pg-sfx-fonts-grid > .mtm-empty {
+    grid-column: 1 / -1;
+    font-size: 11px;
+}
+
+/* 見本の登録ボタン（左上）。外すボタン（右上）と同じく、指を乗せたときだけ出す */
+.ps-pg-sfx-fontcard-add {
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    opacity: 0;
+}
+
+.ps-pg-sfx-stamp:hover .ps-pg-sfx-fontcard-add {
+    opacity: 1;
+}
+
 .ps-pg-sfx-group {
     margin-top: 4px;
 }
