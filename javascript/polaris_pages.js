@@ -269,6 +269,50 @@
         parent.appendChild(g);
     }
 
+    // ---------- フキダシ ----------
+    // セリフとオノマトペに付ける。balloon = {pts: [[dx, dy], ...], stroke}。頂点は持ち主の枠の中心からのずれ（ページのピクセル）なので、
+    // 持ち主を動かすとフキダシも一緒に動く。セリフは四角だけ（大きさは文字とは別に変えられる）、オノマトペは頂点を足して多角形にできる。
+    // 白で塗り、黒い線（太さ stroke、線の真ん中が頂点を通る）で囲む。持ち主のすぐ下に描く（サーバーの書き出しも同じ）
+    const BALLOON_STROKES = [2, 4, 6, 8, 12];
+    const BALLOON_MAX = 20;
+    const BALLOON_MIN = 3;
+    const ownerCenter = (s) => ({x: s.x + s.w / 2, y: s.y + s.h / 2});
+
+    function balloonPts(s) {
+        const c = ownerCenter(s);
+        return s.balloon.pts.map((p) => [c.x + p[0], c.y + p[1]]);
+    }
+
+    function setBalloonPts(s, abs) {
+        const c = ownerCenter(s);
+        s.balloon = {...s.balloon, pts: abs.map((p) => [round1(p[0] - c.x), round1(p[1] - c.y)])};
+    }
+
+    // 持ち主の枠を少し広げた四角を作る
+    function newBalloon(s) {
+        const b = s.type === "text" ? textBox(s) : s;
+        const m = (s.type === "text" ? s.size : s.params.size) * 0.6;
+        const hw = round1(b.w / 2 + m), hh = round1(b.h / 2 + m);
+        return {pts: [[-hw, -hh], [hw, -hh], [hw, hh], [-hw, hh]], stroke: 4};
+    }
+
+    function drawBalloon(parent, s) {
+        parent.appendChild(svgEl("polygon", {
+            points: pointsAttr(balloonPts(s)), fill: "#fff", stroke: "#000", "stroke-width": s.balloon.stroke, "stroke-linejoin": "round",
+        }));
+    }
+
+    // 頂点が 4 つで、辺が水平・垂直の四角か
+    const isAxisRect = (pts) => pts.length === 4 && pts.every((p, i) => {
+        const n = pts[(i + 1) % 4];
+        return Math.abs(p[0] - n[0]) < 0.5 || Math.abs(p[1] - n[1]) < 0.5;
+    });
+
+    const boundsOf = (pts) => {
+        const xs = pts.map((p) => p[0]), ys = pts.map((p) => p[1]);
+        return {l: Math.min(...xs), t: Math.min(...ys), r: Math.max(...xs), b: Math.max(...ys)};
+    };
+
     // 下を隠す四角が、実際に後ろを隠すか。画像も線もない四角（配置の目安の透明な四角）は何も隠さない
     const hides = (s) => s.type === "rect" && s.front && (s.image || s.stroke);
 
@@ -344,6 +388,7 @@
         if (materials.length || texts.length) {
             const layer = svgEl("svg", {x: 0, y: 0, width: page.width, height: page.height, viewBox: `0 0 ${page.width} ${page.height}`, overflow: "hidden"});
             for (const s of materials) {
+                if (s.balloon) drawBalloon(layer, s);
                 const vector = s.type === "sfx" && window.PolarisSfx ? window.PolarisSfx.node(s) : null;
                 if (vector) {
                     layer.appendChild(vector);
@@ -353,7 +398,10 @@
                 if (url) layer.appendChild(svgEl("image", {href: url, x: s.x, y: s.y, width: s.w, height: s.h, preserveAspectRatio: "none"}));
                 else if (editing) layer.appendChild(svgEl("rect", {x: s.x, y: s.y, width: s.w, height: s.h, class: "ps-pg-empty"}));
             }
-            for (const s of texts) drawText(layer, s, editing);
+            for (const s of texts) {
+                if (s.balloon) drawBalloon(layer, s);
+                drawText(layer, s, editing);
+            }
             g.appendChild(layer);
         }
     }
@@ -495,6 +543,10 @@
                     <select class="ps-pg-toutline" title="文字のフチの太さ（ピクセル）。絵の上に直接置く文字に">${OUTLINES.map((w) => `<option value="${w}">${w ? w + " px" : "なし"}</option>`).join("")}</select>
                     <input type="color" class="ps-pg-toutcolor" title="フチの色">
                 </label>
+                <span class="ps-pg-group ps-pg-tballoon">
+                    <button type="button" class="mtm-btn ps-pg-balloon-toggle" title="選んだセリフに四角い吹き出しを付ける・外す (B)。吹き出しの大きさは、菱形のつまみで文字とは別に変えられます">□ 吹き出し</button>
+                    <select class="ps-pg-balloon-stroke" title="吹き出しの線の太さ">${BALLOON_STROKES.map((w) => `<option value="${w}">線 ${w} px</option>`).join("")}</select>
+                </span>
             </div>
             <div class="ps-pg-fontpicker ps-off">
                 <div class="ps-pg-fontpicker-head">
@@ -645,6 +697,8 @@
         });
         svg.addEventListener("dblclick", (e) => {
             if (!ed || prefs.tool !== "select") return;
+            // フキダシの頂点のダブルクリックは pointerDown で見分ける
+            if (e.target.closest('[data-handle^="b"]')) return;
             const hit = e.target.closest("[data-id]");
             const s = hit && shapeOf(hit.dataset.id);
             if (s && s.type === "rect") openPicker(s);
@@ -989,6 +1043,11 @@
         q(".ps-pg-tcolor").addEventListener("change", (e) => setTextStyle("color", e.target.value.toLowerCase()));
         q(".ps-pg-toutcolor").addEventListener("change", (e) => setTextStyle("outlineColor", e.target.value.toLowerCase()));
         view.querySelectorAll("[data-dir]").forEach((b) => b.addEventListener("click", () => setTextStyle("vertical", b.dataset.dir === "v")));
+        q(".ps-pg-balloon-toggle").addEventListener("click", () => toggleBalloon());
+        q(".ps-pg-balloon-stroke").addEventListener("change", (e) => {
+            setBalloonStroke(Number(e.target.value));
+            refocus();
+        });
         // 数値の欄で Enter を押したら決める（キャンバスの操作に戻る）
         for (const sel of [".ps-pg-tsize", ".ps-pg-tline", ".ps-pg-tspace"]) {
             q(sel).addEventListener("keydown", (e) => {
@@ -1036,6 +1095,15 @@
         set(".ps-pg-toutline", String(t.outline));
         set(".ps-pg-toutcolor", t.outlineColor);
         view.querySelectorAll("[data-dir]").forEach((b) => b.classList.toggle("mtm-active", (b.dataset.dir === "v") === t.vertical));
+        // 吹き出しは置いたセリフにだけ付けられる（これから置くセリフの書式にはない）
+        const placed = t.type === "text";
+        q(".ps-pg-tballoon").classList.toggle("ps-off", !placed);
+        if (placed) {
+            q(".ps-pg-balloon-toggle").classList.toggle("mtm-active", !!t.balloon);
+            const stroke = q(".ps-pg-balloon-stroke");
+            stroke.classList.toggle("ps-off", !t.balloon);
+            if (t.balloon && document.activeElement !== stroke) stroke.value = String(t.balloon.stroke);
+        }
     }
 
     // p（ページのピクセル）を中心に、空のセリフを置いて入力を始める
@@ -1382,6 +1450,24 @@
                         }}),
                 ]),
                 el("div", {class: "ps-pg-sfx-fonts-grid"}),
+            ]),
+            el("div", {class: "ps-pg-sfx-balloon"}, [
+                el("div", {class: "ps-pg-sfx-row"}, [
+                    el("button", {type: "button", class: "mtm-btn ps-pg-sfx-balloon-toggle", text: "□ フキダシ",
+                        title: "このオノマトペにフキダシ（白地に黒い線）を付ける・外す (B)", onclick: () => toggleBalloon()}),
+                    el("button", {type: "button", class: "mtm-btn ps-pg-sfx-balloon-edit", text: "頂点を編集",
+                        title: "フキダシの頂点を動かします。辺の真ん中の丸をドラッグで頂点を足し（20 個まで）、頂点をダブルクリックで消します。矢印キーで最後に触った頂点を 1 px（Shift で 10 px）",
+                        onclick: () => toggleBalloonEdit()}),
+                    el("button", {type: "button", class: "mtm-btn ps-pg-sfx-balloon-square", text: "四角に戻す", title: "フキダシを今の外枠の四角に戻します",
+                        onclick: () => squarifyBalloon()}),
+                ]),
+                el("div", {class: "ps-pg-sfx-row ps-pg-sfx-balloon-more"}, [
+                    el("span", {class: "ps-pg-sfx-balloon-info"}),
+                    el("span", {class: "mtm-fs-spacer"}),
+                    el("select", {class: "ps-pg-sfx-balloon-stroke", title: "フキダシの線の太さ",
+                        onchange: (e) => setBalloonStroke(Number(e.target.value))},
+                    BALLOON_STROKES.map((w) => el("option", {value: String(w), text: `線 ${w} px`}))),
+                ]),
             ]),
             el("div", {class: "ps-pg-sfx-glyph"}, [
                 el("div", {class: "ps-pg-sfx-row"}, [
@@ -1730,6 +1816,21 @@
         const p = SFX().clean(s.params);
         const box = q(".ps-pg-sfx-detail");
         renderFontCompare(s);
+        // フキダシ
+        const hasBalloon = !!s.balloon;
+        q(".ps-pg-sfx-balloon-toggle").classList.toggle("mtm-active", hasBalloon);
+        const bedit = q(".ps-pg-sfx-balloon-edit");
+        bedit.disabled = !hasBalloon;
+        bedit.classList.toggle("mtm-active", hasBalloon && balloonEdit);
+        q(".ps-pg-sfx-balloon-square").disabled = !hasBalloon || s.balloon.pts.length === 4 && isAxisRect(s.balloon.pts);
+        q(".ps-pg-sfx-balloon-more").classList.toggle("ps-off", !hasBalloon);
+        if (hasBalloon) {
+            const stroke = q(".ps-pg-sfx-balloon-stroke");
+            if (document.activeElement !== stroke) stroke.value = String(s.balloon.stroke);
+            q(".ps-pg-sfx-balloon-info").textContent = balloonEdit
+                ? `頂点 ${s.balloon.pts.length} / ${BALLOON_MAX}（辺の丸で足す・ダブルクリックで消す）`
+                : `頂点 ${s.balloon.pts.length}`;
+        }
         box.querySelectorAll("[data-sfx]").forEach((input) => {
             if (document.activeElement === input) return;
             const v = getPath(p, input.dataset.sfx);
@@ -1777,6 +1878,8 @@
         const k = s.params.size / drag.sfxSize;
         Object.assign(s, {w: round1(o.w * k), h: round1(o.h * k)});
         Object.assign(s, {x: round1(cx - s.w / 2), y: round1(cy - s.h / 2)});
+        // フキダシも一緒に拡大・縮小する
+        if (drag.origBalloon) s.balloon = {...drag.origBalloon, pts: drag.origBalloon.pts.map((q) => [round1(q[0] * k), round1(q[1] * k)])};
     }
 
     // 書き出し用の画像を作り直す（変更のたびに少し待ってから）。作り直したら保存する
@@ -2047,7 +2150,10 @@
     }
 
     function select(id) {
-        if (ed.sel !== id) activeVertex = activeGlyph = -1;
+        if (ed.sel !== id) {
+            activeVertex = activeGlyph = activeBalloonVertex = -1;
+            balloonEdit = false;
+        }
         ed.sel = id;
         render();
     }
@@ -2057,10 +2163,59 @@
     let vertexMode = false;
     let activeVertex = -1;      // 矢印キーで動かす頂点（最後に触った頂点）
     let activeGlyph = -1;       // 手直しする字（オノマトペの何文字目か）
+    let balloonEdit = false;    // オノマトペのフキダシの頂点を編集しているか
+    let activeBalloonVertex = -1;   // 矢印キーで動かすフキダシの頂点（最後に触った頂点）
+    let lastBalloonPress = {i: -1, id: "", at: 0};  // 頂点のダブルクリックを見分けるための、前に押した頂点と時刻
+    const DOUBLE_PRESS = 400;
+
+    // フキダシを付ける・外す（選んだセリフかオノマトペ）
+    function toggleBalloon() {
+        const s = selected();
+        if (!s || (s.type !== "text" && s.type !== "sfx")) return;
+        balloonEdit = false;
+        activeBalloonVertex = -1;
+        change(() => {
+            if (s.balloon) delete s.balloon;
+            else s.balloon = newBalloon(s);
+        });
+    }
+
+    function setBalloonStroke(w) {
+        const s = selected();
+        if (!s || !s.balloon || !BALLOON_STROKES.includes(w)) return;
+        change(() => (s.balloon = {...s.balloon, stroke: w}));
+    }
+
+    // オノマトペのフキダシの頂点の編集。オンの間は、頂点を動かし、辺の真ん中の丸で頂点を足し、ダブルクリックで頂点を消す
+    function toggleBalloonEdit() {
+        const s = selected();
+        balloonEdit = !balloonEdit && !!(s && s.type === "sfx" && s.balloon);
+        activeBalloonVertex = -1;
+        if (balloonEdit && vertexMode) vertexMode = false;
+        render();
+        refocus();
+    }
+
+    // フキダシを四角に戻す（今の外枠で）
+    function squarifyBalloon() {
+        const s = selected();
+        if (!s || !s.balloon) return;
+        const bb = boundsOf(balloonPts(s));
+        activeBalloonVertex = -1;
+        change(() => setBalloonPts(s, [[bb.l, bb.t], [bb.r, bb.t], [bb.r, bb.b], [bb.l, bb.b]]));
+    }
+
+    function deleteBalloonVertex(i) {
+        const s = selected();
+        if (!s || !s.balloon || s.balloon.pts.length <= BALLOON_MIN) return;
+        activeBalloonVertex = -1;
+        change(() => (s.balloon = {...s.balloon, pts: s.balloon.pts.filter((_, j) => j !== i)}));
+    }
 
     function toggleVertexMode() {
         vertexMode = !vertexMode;
         activeVertex = activeGlyph = -1;
+        if (vertexMode) balloonEdit = false;
         if (vertexMode && prefs.tool !== "select") setTool("select");
         else if (ed) render();
         refocus();
@@ -2171,6 +2326,8 @@
             ? (stampSource.kind === "stamp"
                 ? `調整済みスタンプ「${stampSource.params.text}」：左クリックで 1 つ置いて選んだ状態にします（そのまま調整できます）。右クリックなら置いたあとも続けて置けます${prefs.sfxVary ? "（置くたびに形が少し変わります）" : ""}。Esc か V で選択に戻ります。`
                 : `スタンプ「${stampSource.params.text}」：クリックした所に置きます。続けて置けます${prefs.sfxVary ? "（置くたびに形が少し変わります）" : ""}。Esc か V で選択に戻ります。置いたオノマトペは「選択」で選ぶと細かく調整できます。`)
+            : balloonEdit && s && s.balloon
+                ? "フキダシの頂点を編集します：丸をドラッグで動かす（Shift で水平か垂直だけ）、辺の真ん中の小さな丸をドラッグで頂点を足す（20 個まで）、頂点をダブルクリックで消す。矢印キーで最後に触った頂点を 1 px（Shift で 10 px）。"
             : vertexMode && s && s.type === "sfx"
                 ? "字を 1 つずつ直します：字を押して選び、ドラッグで移動（Shift で縦か横だけ）、上の丸で回転（Shift で 15° ずつ）、右下の四角で大きさ。外枠の角の色付きの四角で、枠全体の大きさを変えます。矢印キーで 1 px（Shift で 10 px）。E で終わります。"
                 : HINTS[prefs.tool] || "";
@@ -2243,12 +2400,17 @@
             if (s.type === "line") hits.appendChild(svgEl("line", {x1: s.x1, y1: s.y1, x2: s.x2, y2: s.y2, "stroke-width": Math.max(s.stroke, 14 * u), "data-id": s.id}));
         }
         // 素材はいちばん上の層なので、クリックもいちばん手前で受ける
+        // フキダシは持ち主のすぐ下で受ける（押すと持ち主を選ぶ）
+        const balloonHit = (s) => s.balloon && hits.appendChild(svgEl("polygon", {points: pointsAttr(balloonPts(s)), "data-id": s.id}));
         for (const s of page.shapes) {
-            if (s.type === "material" || s.type === "sfx") hits.appendChild(svgEl("rect", {x: s.x, y: s.y, width: s.w, height: s.h, "data-id": s.id}));
+            if (s.type !== "material" && s.type !== "sfx") continue;
+            balloonHit(s);
+            hits.appendChild(svgEl("rect", {x: s.x, y: s.y, width: s.w, height: s.h, "data-id": s.id}));
         }
         // セリフはさらに上
         for (const s of page.shapes) {
             if (s.type !== "text") continue;
+            balloonHit(s);
             const b = textBox(s);
             hits.appendChild(svgEl("rect", {x: b.x, y: b.y, width: b.w, height: b.h, "data-id": s.id, class: "ps-pg-hit-text"}));
         }
@@ -2264,6 +2426,35 @@
             x: x - HANDLE * u / 2, y: y - HANDLE * u / 2, width: HANDLE * u, height: HANDLE * u,
             "data-handle": name, class: "ps-pg-handle ps-pg-handle-" + name,
         });
+        // フキダシ。頂点の編集中（オノマトペ）は頂点の丸と、辺の真ん中の「頂点を足す」丸。でなければ外枠の 8 つのつまみ（菱形）
+        if (s.balloon && (s.type === "text" || s.type === "sfx")) {
+            const pts = balloonPts(s);
+            g.appendChild(svgEl("polygon", {points: pointsAttr(pts), class: "ps-pg-sel-outline ps-pg-balloon-outline"}));
+            if (balloonEdit && s.type === "sfx") {
+                pts.forEach((p, i) => {
+                    const n = pts[(i + 1) % pts.length];
+                    if (pts.length < BALLOON_MAX) {
+                        g.appendChild(svgEl("circle", {cx: (p[0] + n[0]) / 2, cy: (p[1] + n[1]) / 2, r: HANDLE * 0.45 * u, "data-handle": "bm" + i, class: "ps-pg-balloon-mid"}));
+                    }
+                });
+                pts.forEach((p, i) => g.appendChild(svgEl("circle", {
+                    cx: p[0], cy: p[1], r: HANDLE * 0.65 * u, "data-handle": "bv" + i,
+                    class: "ps-pg-vertex ps-pg-balloon-vertex" + (i === activeBalloonVertex ? " ps-on" : ""),
+                })));
+            } else {
+                const bb = boundsOf(pts);
+                const xs = {w: bb.l, c: (bb.l + bb.r) / 2, e: bb.r};
+                const ys = {n: bb.t, c: (bb.t + bb.b) / 2, s: bb.b};
+                for (const name of RECT_HANDLES) {
+                    const v = name.match(/[ns]/) ? name.match(/[ns]/)[0] : "c";
+                    const hz = name.match(/[we]/) ? name.match(/[we]/)[0] : "c";
+                    const h = handle("b" + name, xs[hz], ys[v]);
+                    h.setAttribute("transform", `rotate(45 ${xs[hz]} ${ys[v]})`);
+                    h.classList.add("ps-pg-balloon-handle", "ps-pg-handle-" + name);
+                    g.appendChild(h);
+                }
+            }
+        }
         // 字の手直し中のオノマトペは、字ごとの枠
         const fr = s.type === "sfx" && vertexMode && SFX() ? SFX().frames(s) : null;
         // セリフの大きさは文字の大きさで決まるので、つまみは出さない
@@ -2408,7 +2599,32 @@
                 drag.kind = "handle";
                 drag.handle = handle.dataset.handle;
                 drag.id = ed.sel;
-                if (drag.handle[0] === "v") {
+                const owner = selected();
+                if (drag.handle.startsWith("bm")) {
+                    // 辺の真ん中を押したら、そこに頂点を足して、その頂点を動かす
+                    const i = Number(drag.handle.slice(2));
+                    const pts = balloonPts(owner);
+                    const n = pts[(i + 1) % pts.length];
+                    pts.splice(i + 1, 0, [(pts[i][0] + n[0]) / 2, (pts[i][1] + n[1]) / 2]);
+                    setBalloonPts(owner, pts);
+                    drag.handle = "bv" + (i + 1);
+                    drag.moved = true;      // 動かさなくても、足した頂点は 1 回の変更として残す
+                }
+                if (owner.balloon) drag.origBalloon = JSON.parse(JSON.stringify(owner.balloon));
+                if (drag.handle.startsWith("bv")) {
+                    const i = Number(drag.handle.slice(2));
+                    // 同じ頂点を続けて 2 回押したら（ダブルクリック）、その頂点を消す。押すたびに描き直すので、dblclick は届かない
+                    const now = Date.now();
+                    const twice = lastBalloonPress.i === i && lastBalloonPress.id === owner.id && now - lastBalloonPress.at < DOUBLE_PRESS;
+                    lastBalloonPress = twice ? {i: -1, id: "", at: 0} : {i, id: owner.id, at: now};
+                    if (twice) {
+                        drag = null;
+                        deleteBalloonVertex(i);
+                        return;
+                    }
+                    activeBalloonVertex = i;
+                    render();
+                } else if (drag.handle[0] === "v") {
                     activeVertex = Number(drag.handle.slice(1));
                     drag.origPts = cornersOf(selected());
                     render();
@@ -2525,6 +2741,10 @@
     function dragHandle(p, shift) {
         const s = shapeOf(drag.id);
         const o = drag.orig;
+        if (drag.handle[0] === "b" && drag.origBalloon) {
+            dragBalloon(s, p, shift);
+            return;
+        }
         if (s.type === "material") {
             resizeMaterial(s, o, {x: snapX(p.x), y: snapY(p.y)}, shift);
             return;
@@ -2566,6 +2786,31 @@
         if (o.pts) {
             setPoints(s, o.pts.map((pt) => [l + (pt[0] - o.x) * (r - l) / o.w, t + (pt[1] - o.y) * (b - t) / o.h]));
         }
+    }
+
+    // フキダシ。bv は頂点を動かす（Shift で元の位置から水平か垂直だけ）。b + 向き（bnw など）は外枠の大きさを変え、頂点を外枠に合わせて伸び縮みさせる
+    function dragBalloon(s, p, shift) {
+        const c = ownerCenter(s);
+        const orig = drag.origBalloon.pts.map((q) => [c.x + q[0], c.y + q[1]]);
+        const h = drag.handle;
+        if (h.startsWith("bv")) {
+            const i = Number(h.slice(2));
+            let v = {x: p.x, y: p.y};
+            if (shift) v = Math.abs(v.x - orig[i][0]) >= Math.abs(v.y - orig[i][1]) ? {x: v.x, y: orig[i][1]} : {x: orig[i][0], y: v.y};
+            const pts = orig.slice();
+            pts[i] = [v.x, v.y];
+            if (Math.abs(polyArea(pts)) < MIN_SIZE * MIN_SIZE) return;
+            setBalloonPts(s, pts);
+            return;
+        }
+        const bb = boundsOf(orig);
+        let l = bb.l, t = bb.t, r = bb.r, b = bb.b;
+        if (h.includes("w")) l = Math.min(p.x, r - MIN_SIZE);
+        if (h.includes("e")) r = Math.max(p.x, l + MIN_SIZE);
+        if (h.includes("n")) t = Math.min(p.y, b - MIN_SIZE);
+        if (h.includes("s")) b = Math.max(p.y, t + MIN_SIZE);
+        const sx = (r - l) / Math.max(bb.r - bb.l, 1e-6), sy = (b - t) / Math.max(bb.b - bb.t, 1e-6);
+        setBalloonPts(s, orig.map((q) => [l + (q[0] - bb.l) * sx, t + (q[1] - bb.t) * sy]));
     }
 
     // 字の手直し。gm は字を動かす（Shift で縦か横だけ）、gr は字の真ん中を軸に回す（Shift で 15° ずつ）、gs は大きさを変える
@@ -2670,6 +2915,12 @@
     function nudge(dx, dy) {
         const s = selected();
         if (!s) return;
+        // フキダシの頂点の編集中は、最後に触った頂点だけを動かす
+        if (balloonEdit && s.balloon && activeBalloonVertex >= 0 && activeBalloonVertex < s.balloon.pts.length) {
+            const i = activeBalloonVertex;
+            change(() => (s.balloon = {...s.balloon, pts: s.balloon.pts.map((p, j) => (j === i ? [round1(p[0] + dx), round1(p[1] + dy)] : p))}));
+            return;
+        }
         // 字の手直し中は、選んだ字だけを動かす
         if (s.type === "sfx" && vertexMode && activeGlyph >= 0) {
             const fr = SFX().frames(s);
@@ -2738,6 +2989,7 @@
             else if (drag) cancelDrag();
             else if (typing) e.target.blur();
             else if (prefs.tool === "sfx") setTool("select");
+            else if (balloonEdit) toggleBalloonEdit();
             else if (ed.sel) select(null);
             else close();
             return;
@@ -2785,6 +3037,9 @@
         } else if (key === "g" && selected() && selected().type === "sfx") {
             stop();
             rerollSfx();
+        } else if (key === "b" && selected() && (selected().type === "text" || selected().type === "sfx")) {
+            stop();
+            toggleBalloon();
         } else if (key === "h" && selected()) {
             stop();
             toggleFront();

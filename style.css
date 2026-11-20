@@ -3166,6 +3166,45 @@ body.mtm-fs-open {
     opacity: 0.4;
 }
 
+/* フキダシの選択。外枠のつまみは菱形（持ち主のつまみと見分ける） */
+.ps-pg-balloon-outline {
+    stroke-dasharray: 6 4;
+}
+
+.ps-pg-handle.ps-pg-balloon-handle {
+    fill: #fff;
+    stroke: #2563eb;
+}
+
+.ps-pg-balloon-vertex {
+    stroke: #2563eb;
+}
+
+.ps-pg-balloon-vertex.ps-on {
+    fill: #2563eb;
+}
+
+/* 辺の真ん中の「頂点を足す」丸 */
+.ps-pg-balloon-mid {
+    fill: rgba(37, 99, 235, 0.35);
+    stroke: #2563eb;
+    stroke-width: 1px;
+    vector-effect: non-scaling-stroke;
+    cursor: copy;
+}
+
+.ps-pg-sfx-balloon {
+    margin: 4px 0;
+    padding: 6px;
+    border: 1px solid var(--border-color-primary);
+    border-radius: 6px;
+}
+
+.ps-pg-sfx-balloon-info {
+    font-size: 11px;
+    color: var(--body-text-color-subdued);
+}
+
 /* カット案を対応させたコマの名札（編集画面だけ） */
 .ps-pg-cutlink {
     pointer-events: none;

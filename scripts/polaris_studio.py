@@ -398,6 +398,7 @@ def _sanitize_page(raw, cut_ids):
                 "w": w,
                 "h": h,
                 "params": params,
+                **_balloon(s.get("balloon")),
             })
     # 名前は Book の画面で見分けるためのもの（書き出しのファイル名には使わない）
     name = str(raw.get("name", "")).strip()[:PAGE_NAME_MAX]
@@ -431,12 +432,36 @@ def _color(value, default):
     return value.lower() if re.fullmatch(r"#[0-9a-fA-F]{6}", value) else default
 
 
+# フキダシ（セリフとオノマトペに付ける）。pts は持ち主の枠の中心からのずれ（ページのピクセル）で 3〜20 個、stroke は線の太さ。
+# 白で塗り、黒い線（線の真ん中が頂点を通る）で囲む。持ち主のすぐ下に描く
+BALLOON_STROKES = (2, 4, 6, 8, 12)
+BALLOON_POINTS = (3, 20)
+
+
+def _balloon(raw):
+    if not isinstance(raw, dict) or not isinstance(raw.get("pts"), list):
+        return {}
+    pts = []
+    for p in raw["pts"][:BALLOON_POINTS[1]]:
+        if not isinstance(p, (list, tuple)) or len(p) != 2:
+            return {}
+        pts.append([_number(p[0]), _number(p[1])])
+    if len(pts) < BALLOON_POINTS[0]:
+        return {}
+    try:
+        stroke = int(raw.get("stroke"))
+    except (TypeError, ValueError):
+        stroke = 4
+    return {"balloon": {"pts": pts, "stroke": stroke if stroke in BALLOON_STROKES else 4}}
+
+
 def _sanitize_text(s):
     text = str(s.get("text", "")).replace("\r\n", "\n").replace("\r", "\n")[:TEXT_MAX]
     if not text.strip():
         return None
     font = str(s.get("font", ""))
     return {
+        **_balloon(s.get("balloon")),
         "id": _safe_id(s.get("id")),
         "type": "text",
         "x": _number(s.get("x")),
@@ -1105,6 +1130,36 @@ def _polygon_mask(s, stroke):
     return x0, y0, fill.resize((w, h), Image.BOX)
 
 
+# フキダシを描く。縁を滑らかにするため、コマと同じく大きく描いてから縮めて重ねる
+def _paste_balloon(canvas, s):
+    balloon = s.get("balloon")
+    if not balloon:
+        return
+    cx, cy = s["x"] + s["w"] / 2, s["y"] + s["h"] / 2
+    pts = [(cx + dx, cy + dy) for dx, dy in balloon["pts"]]
+    stroke = balloon["stroke"]
+    pad = stroke + 2
+    x0 = int(min(p[0] for p in pts) - pad)
+    y0 = int(min(p[1] for p in pts) - pad)
+    x1 = int(max(p[0] for p in pts) + pad) + 1
+    y1 = int(max(p[1] for p in pts) + pad) + 1
+    k = PANEL_AA
+    local = [((px - x0) * k, (py - y0) * k) for px, py in pts]
+    size = ((x1 - x0) * k, (y1 - y0) * k)
+    fill = Image.new("L", size, 0)
+    ImageDraw.Draw(fill).polygon(local, fill=255)
+    line = Image.new("L", size, 0)
+    ImageDraw.Draw(line).line(local + local[:1], fill=255, width=max(1, stroke * k), joint="curve")
+    shape = ImageChops.lighter(fill, line).resize((x1 - x0, y1 - y0), Image.BOX)
+    ink = line.resize((x1 - x0, y1 - y0), Image.BOX)
+    layer = Image.new("RGBA", (x1 - x0, y1 - y0), (255, 255, 255, 0))
+    layer.putalpha(shape)
+    black = Image.new("RGBA", layer.size, (0, 0, 0, 255))
+    layer = Image.composite(black, layer, ink)
+    layer.putalpha(shape)
+    canvas.paste(layer, (x0, y0), layer)
+
+
 # 素材を置いた大きさにして重ねる。ページからはみ出した所は切れる。見つからない素材は飛ばす
 def _paste_material(canvas, project, s):
     path = material_path(project, s["name"])
@@ -1256,12 +1311,16 @@ def render_page(project, page):
         elif s["type"] == "line":
             draw.line(((s["x1"], s["y1"]), (s["x2"], s["y2"])), fill="black", width=s["stroke"])
     # 3. 素材とオノマトペは、コマと線の上に並び順に重ねる（透明な所は下が見える）
+    # フキダシは持ち主のすぐ下に描く
     for s in page["shapes"]:
+        if s["type"] == "sfx":
+            _paste_balloon(canvas, s)
         if s["type"] in ("material", "sfx") and s["name"]:
             _paste_material(canvas, project, s)
     # 4. セリフはいちばん上に、並び順に
     for s in page["shapes"]:
         if s["type"] == "text":
+            _paste_balloon(canvas, s)
             _paste_text(canvas, s)
     out = io.BytesIO()
     canvas.save(out, "PNG")
