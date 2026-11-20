@@ -459,6 +459,10 @@
     }
 
     function onKeydown(e) {
+        if (e.code === "KeyB" && e.altKey && !e.ctrlKey && !e.shiftKey && !e.metaKey) {
+            toggleBooksByKey(e);
+            return;
+        }
         // コマページの編集画面を開いている間は、キー操作をすべて編集画面に任せる
         if (window.PolarisPages && window.PolarisPages.isOpen()) {
             window.PolarisPages.keydown(e);
@@ -496,6 +500,24 @@
         else if (isOpen(".ps-gallery-view")) closeGallery();
         else if (isOpen(".ps-project-view")) showList();
         else close();
+    }
+
+    // Alt+B：プロジェクトの画面から Book を開き、Book の画面（コマページの編集中も）からはプロジェクトの画面に戻る。
+    // ダイアログやビューワーなどを開いている間と、プロンプト編集の間は何もしない
+    function toggleBooksByKey(e) {
+        if (root.classList.contains("ps-off")) return;
+        const blocking = [".ps-delete-dialog", ".ps-viewer", ".ps-queues-view", ".ps-new-dialog", ".ps-cover-dialog", ".ps-key-dialog"].some(isOpen);
+        if (blocking) return;
+        if (isOpen(".ps-books-view")) {
+            if (window.PolarisPages.busy()) return;
+            e.preventDefault();
+            e.stopPropagation();
+            closeBooks();
+        } else if (isOpen(".ps-project-view")) {
+            e.preventDefault();
+            e.stopPropagation();
+            openBooks();
+        }
     }
 
     async function open() {

@@ -3009,5 +3009,7 @@
         refocus();
     }
 
-    window.PolarisPages = {newPage, thumb, open, close, isOpen, keydown, refresh: () => ed && render()};
+    // 画像のクロップ・フォント選び・セリフの入力・ドラッグの途中か（Alt+B で閉じないようにする）
+    const busy = () => !!ed && (isCropOpen() || isFontPickerOpen() || !!textEdit || !!drag);
+    window.PolarisPages = {newPage, thumb, open, close, isOpen, busy, keydown, refresh: () => ed && render()};
 })();
