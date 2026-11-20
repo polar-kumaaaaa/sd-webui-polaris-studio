@@ -322,6 +322,13 @@ def _panel_points(raw):
     return pts if abs(area) >= 16 else None
 
 
+def _panel_cut(raw, cut_ids):
+    cut = str(raw or "")
+    if not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", cut) or (cut_ids is not None and cut not in cut_ids):
+        return {}
+    return {"cut": cut}
+
+
 def _sanitize_page(raw, cut_ids):
     shapes = []
     for s in _dicts(raw.get("shapes")):
@@ -350,6 +357,8 @@ def _sanitize_page(raw, cut_ids):
                 "stroke": _stroke(s.get("stroke"), True),
                 # 重なったとき、この四角で後ろのコマ（画像と線）を隠す
                 **({"front": True} if s.get("front") is True else {}),
+                # このコマ用として対応させたカット案（画像を選ぶとき、そのカット案から始める）。なくなったカット案は外す
+                **_panel_cut(s.get("cut"), cut_ids),
                 "image": _sanitize_panel_image(s.get("image"), cut_ids),
             })
         elif s.get("type") == "material":

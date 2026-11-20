@@ -1651,6 +1651,15 @@
         return `\n⚠ このうち ${n} 枚は Book（${hit.map((x) => `「${x.b.title}」${x.n} 枚`).join("、")}）のコマで使われています。削除すると、はめ込んだコマは空になります。`;
     }
 
+    // 消したカット案を、コマの対応（このコマ用のカット案）から外す
+    function unlinkCutFromBooks(cutId) {
+        for (const b of project.books) {
+            for (const p of pageItems(b)) {
+                for (const s of p.shapes) if (s.cut === cutId) delete s.cut;
+            }
+        }
+    }
+
     // 消えた画像やカット案を、コマのはめ込みから外す
     function removeFromBooks(match) {
         for (const b of project.books) {
@@ -2900,6 +2909,7 @@
             }
             scene.cuts.splice(scene.cuts.indexOf(cut), 1);
             removeFromBooks((r) => r.cutId === cut.id);
+            unlinkCutFromBooks(cut.id);
             for (const k of [...selectedImages]) if (selCutId(k) === cut.id) selectedImages.delete(k);
             renderScenes();
             loadI2i();  // 消したカット案への img2img の保存はサーバーで解除される

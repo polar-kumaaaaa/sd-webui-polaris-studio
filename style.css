@@ -3166,6 +3166,28 @@ body.mtm-fs-open {
     opacity: 0.4;
 }
 
+/* カット案を対応させたコマの名札（編集画面だけ） */
+.ps-pg-cutlink {
+    pointer-events: none;
+}
+
+.ps-pg-cutlink rect {
+    fill: rgba(0, 0, 0, 0.6);
+}
+
+.ps-pg-cutlink text {
+    fill: #fff;
+}
+
+/* 画像選びのカット案の一覧で、このコマに対応させたカット案の印 */
+.ps-pg-picklink {
+    position: absolute;
+    right: 5px;
+    top: 26px;
+    font-size: 14px;
+    filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.6));
+}
+
 /* 字の手直し中に出す、枠全体の大きさのつまみ。字のつまみ（白）と見分けるよう塗る */
 .ps-pg-handle.ps-pg-handle-frame {
     fill: var(--color-accent, #ff7c00);

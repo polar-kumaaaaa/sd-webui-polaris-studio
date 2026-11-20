@@ -559,6 +559,7 @@
                         <span class="ps-pg-crop-title"></span>
                         <span class="ps-pg-crop-info"></span>
                         <span class="mtm-fs-spacer"></span>
+                        <button type="button" class="mtm-btn ps-pg-pick-link ps-off"></button>
                         <label class="ps-fav-only ps-pg-favonly ps-off" title="お気に入り（♥）にした画像だけを出します。カット案の一覧では、お気に入りのあるカット案だけを出します"><input type="checkbox" class="ps-pg-favonly-check"> ♥ お気に入りのみ</label>
                         <span class="ps-pg-group ps-pg-cropmode ps-off">
                             <button type="button" class="mtm-btn" data-mode="cover" title="選んだ範囲をコマいっぱいに拡大・縮小します">拡大して合わせる</button>
@@ -2216,6 +2217,22 @@
         drawPage(g, page, (ref) => ed.opts.resolve(ref, false), true);
         svg.appendChild(g);
         const u = unit();
+        // カット案を対応させたコマには、左上にカット案の名前を出す（編集画面だけ。書き出しには入らない）
+        for (const s of page.shapes) {
+            const cut = s.type === "rect" && s.cut ? cutInfo(s.cut) : null;
+            if (!cut) continue;
+            const x = s.pts ? Math.min(...s.pts.map((p) => p[0])) : s.x;
+            const y = s.pts ? Math.min(...s.pts.map((p) => p[1])) : s.y;
+            const size = 13 * u;
+            // コマの幅に収まらない名前は … で切る
+            const fit = Math.max(2, Math.floor((s.w - 8 * u) / size) - 2);
+            const label = "📌 " + shortText(cut.title, fit);
+            const w = Math.min(s.w - 8 * u, ([...label].length + 1) * size);
+            svg.appendChild(svgEl("g", {class: "ps-pg-cutlink"}, [
+                svgEl("rect", {x: x + 4 * u, y: y + 4 * u, width: w, height: size * 1.6, rx: 3 * u}),
+                svgEl("text", {x: x + 4 * u + size * 0.4, y: y + 4 * u + size * 0.8, "font-size": size, "dominant-baseline": "central", text: label}),
+            ]));
+        }
         // クリックを受ける面。四角は中ごと、直線は細くても掴めるよう太めに取る。直線を四角より手前にする
         const hits = svgEl("g", {class: "ps-pg-hits"});
         for (const s of page.shapes) {
@@ -2798,6 +2815,17 @@
         // 選び直すときは、いま選んでいる画像のカット案の画像一覧に戻る
         q(".ps-pg-crop-repick").addEventListener("click", () => (crop.image ? showCutImages(crop.image.cutId) : showPicker()));
         q(".ps-pg-pick-back").addEventListener("click", () => showPicker());
+        // 開いているカット案を、このコマに対応させる（もう対応していれば外す）。画像は選ばなくてよい
+        q(".ps-pg-pick-link").addEventListener("click", () => {
+            const rect = crop.rect;
+            const cutId = crop.pickCut;
+            if (!rect || !cutId) return;
+            change(() => {
+                if (rect.cut === cutId) delete rect.cut;
+                else rect.cut = cutId;
+            });
+            showCutImages(cutId);
+        });
         // 「お気に入りのみ」は覚えておき、次に開くときも同じ状態にする。いま出している一覧を作り直す
         q(".ps-pg-favonly-check").addEventListener("change", (e) => {
             prefs.favOnly = e.target.checked;
@@ -2926,8 +2954,12 @@
         // はめ込み済みなら、その画像の範囲を直すところから始める
         const url = rect.image && ed.opts.resolve(rect.image, false);
         if (url) startCrop({cutId: rect.image.cutId, name: rect.image.name}, url);
+        // カット案を対応させたコマは、そのカット案の画像から始める
+        else if (rect.cut && cutInfo(rect.cut)) showCutImages(rect.cut);
         else showPicker();
     }
+
+    const cutInfo = (id) => (ed.opts.cuts ? ed.opts.cuts().find((c) => c.id === id) : null) || null;
 
     // 画像を選ぶ段階（カット案の一覧と画像の一覧）の共通の見た目にする
     function pickStep(title, note) {
@@ -2937,6 +2969,12 @@
         q(".ps-pg-crop-note").textContent = note;
         q(".ps-pg-crop-note").classList.remove("ps-pg-warn");
         q(".ps-pg-pick-back").classList.toggle("ps-off", !crop.pickCut);
+        const link = q(".ps-pg-pick-link");
+        const linked = !!crop.pickCut && crop.rect.cut === crop.pickCut;
+        link.classList.toggle("ps-off", !crop.pickCut);
+        link.classList.toggle("mtm-active", linked);
+        link.textContent = linked ? "📌 このコマに対応中（外す）" : "📌 このコマに対応させる";
+        link.title = linked ? "このコマとカット案の対応を外します" : "このカット案をこのコマ用として覚えておきます。次からこのコマで「画像を選ぶ」と、このカット案の画像から始まります（ほかのカット案の画像も選べます）";
         q(".ps-pg-favonly").classList.remove("ps-off");
         q(".ps-pg-favonly-check").checked = prefs.favOnly;
         q(".ps-pg-cropstage").classList.add("ps-off");
@@ -2980,7 +3018,8 @@
             grid.appendChild(el("div", {class: "mtm-empty", text: !all.length ? "カット案がありません。"
                 : "お気に入りの画像のあるカット案がありません。サムネイル一覧のビューワーの「♡ お気に入り」（F キー）で付けられます。"}));
         }
-        const current = crop.rect.image ? crop.rect.image.cutId : lastPickCut;
+        const current = crop.rect.image ? crop.rect.image.cutId : crop.rect.cut || lastPickCut;
+        const linkedCut = crop.rect.cut || "";
         let scene = null;
         let focus = null;
         for (const c of cuts) {
@@ -2995,6 +3034,7 @@
             }, [
                 c.thumb ? el("img", {src: c.thumb, alt: "", loading: "lazy", draggable: "false"}) : el("span", {class: "ps-pg-pickempty", text: "画像なし"}),
                 ...pickMarks(c.panels, c.favorites),
+                ...(c.id === linkedCut ? [el("span", {class: "ps-pg-picklink", text: "📌", title: "このコマに対応させたカット案"})] : []),
                 el("span", {class: "ps-pg-pickitem-count", text: count}),
                 el("span", {class: "ps-pg-pickitem-label", text: c.title}),
             ]);
@@ -3038,6 +3078,7 @@
         crop.image = {cutId: ref.cutId, name: ref.name};
         lastPickCut = ref.cutId;
         q(".ps-pg-pick-back").classList.add("ps-off");
+        q(".ps-pg-pick-link").classList.add("ps-off");
         q(".ps-pg-favonly").classList.add("ps-off");
         q(".ps-pg-crop-title").textContent = "はめ込む範囲を決める";
         q(".ps-pg-crop-note").textContent = "";
