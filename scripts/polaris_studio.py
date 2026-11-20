@@ -276,6 +276,7 @@ PAGE_HEIGHT = 2200
 PAGE_SIZE_MIN = 64
 PAGE_SIZE_MAX = 8192
 PAGE_STROKES = (0, 4, 8, 12, 16, 24)    # 0 は線なし（四角だけ）
+PAGE_NAME_MAX = 40
 
 
 def _number(value, default=0.0):
@@ -389,9 +390,12 @@ def _sanitize_page(raw, cut_ids):
                 "h": h,
                 "params": params,
             })
+    # 名前は Book の画面で見分けるためのもの（書き出しのファイル名には使わない）
+    name = str(raw.get("name", "")).strip()[:PAGE_NAME_MAX]
     return {
         "type": "page",
         "id": _safe_id(raw.get("id")),
+        **({"name": name} if name else {}),
         "width": _page_size(raw.get("width"), PAGE_WIDTH),
         "height": _page_size(raw.get("height"), PAGE_HEIGHT),
         "shapes": shapes,

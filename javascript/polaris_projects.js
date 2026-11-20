@@ -1626,7 +1626,8 @@
             b.items.forEach((r, i) => {
                 if (!isPage(r) || !r.shapes.some((s) => s.image && refKey(s.image) === key)) return;
                 const no = String(i + 1).padStart(width, "0");
-                names.push(withTitle ? `「${b.title}」の ${no}` : `${no} ページ`);
+                const name = r.name ? `（${r.name}）` : "";
+                names.push(withTitle ? `「${b.title}」の ${no}${name}` : `${no} ページ${name}`);
             });
         }
         return names;
@@ -1711,14 +1712,18 @@
         const width = Math.max(3, String(book.items.length).length);
         book.items.forEach((r, i) => {
             const no = el("span", {class: "ps-book-no", text: String(i + 1).padStart(width, "0")});
-            const page = el("div", {class: "ps-book-page ps-book-komapage", draggable: "true", title: `コマページ ${r.width} × ${r.height}\nクリックで編集`}, [
+            const page = el("div", {class: "ps-book-page ps-book-komapage", draggable: "true", title: `${r.name || "コマページ"} ${r.width} × ${r.height}\nクリックで編集`}, [
                 window.PolarisPages.thumb(r, (ref) => {
                     if (ref.material) return materialUrl(project, ref.material);
                     const found = findImage(ref);
                     return found ? imageUrl(project, found.cut, found.image, true) : null;
                 }),
                 no,
-                el("span", {class: "ps-book-cut", text: "コマページ"}),
+                el("span", {class: "ps-book-cut ps-book-name" + (r.name ? "" : " ps-book-name-empty"), text: r.name || "名前を付ける", title: "クリックで名前を付ける・変える",
+                    onclick: (e) => {
+                        e.stopPropagation();
+                        editPageName(book, r, e.currentTarget);
+                    }}),
                 el("button", {type: "button", class: "mtm-icon ps-book-dup", title: "コマページを複製（すぐ後ろに同じ中身のコマページを足します）", text: "⧉", onclick: () => duplicatePage(book, r)}),
                 el("button", {type: "button", class: "mtm-icon ps-book-remove", title: "コマページを削除（画像は削除しません）", text: "✕", onclick: () => deletePage(book, r)}),
             ]);
@@ -1798,6 +1803,35 @@
         await saveProjects();
     }
 
+    // Book の画面のコマページの名前を、その場の入力欄で変える。Enter か外を押すと決め、Esc でやめる
+    function editPageName(book, page, label) {
+        const input = el("input", {type: "text", class: "ps-book-name-input", value: page.name || "", placeholder: "コマページの名前", maxlength: "40"});
+        let done = false;
+        const finish = async (save) => {
+            if (done) return;
+            done = true;
+            const name = input.value.trim();
+            const changed = save && name !== (page.name || "");
+            if (changed) {
+                if (name) page.name = name;
+                else delete page.name;
+            }
+            renderBooks();
+            if (changed) await saveProjects();
+        };
+        input.addEventListener("click", (e) => e.stopPropagation());
+        input.addEventListener("mousedown", (e) => e.stopPropagation());
+        input.addEventListener("keydown", (e) => {
+            e.stopPropagation();
+            if (e.key === "Enter" && !e.isComposing) finish(true);
+            else if (e.key === "Escape") finish(false);
+        });
+        input.addEventListener("blur", () => finish(true));
+        label.replaceWith(input);
+        input.focus();
+        input.select();
+    }
+
     async function deletePage(book, page) {
         const n = page.shapes.length;
         if (n && !confirm(`このコマページを削除しますか？\n描いた ${n} 個の図形も消えます。はめ込んだ画像は削除されません。`)) return;
@@ -1817,8 +1851,7 @@
         window.PolarisPages.open({
             host: overlay,
             page,
-            title: (pg) => `${book.title}  ${book.items.indexOf(pg) + 1} / ${book.items.length}`,
-            // 並べて表示したり、ホイールで移ったりするコマページ（Book の順）
+            title: (pg) => `${book.title}  ${book.items.indexOf(pg) + 1} / ${book.items.length}`,            // 並べて表示したり、ホイールで移ったりするコマページ（Book の順）
             pages: () => pageItems(book),
             // 上部バーの真ん中の「プロジェクトへ戻る」。編集画面を閉じたあとに呼ばれ、Book の画面も閉じる
             projectTitle: () => project.title,

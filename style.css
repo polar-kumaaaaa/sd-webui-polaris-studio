@@ -2434,6 +2434,46 @@ body.mtm-fs-open {
     display: none;
 }
 
+/* コマページの名前。押すとその場で入力欄になる */
+.ps-book-name {
+    cursor: text;
+}
+
+.ps-book-name:hover {
+    background: rgba(0, 0, 0, 0.75);
+    text-decoration: underline dotted;
+}
+
+.ps-book-name-empty {
+    color: rgba(255, 255, 255, 0.6);
+}
+
+.ps-book-name-input {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    width: 100%;
+    box-sizing: border-box;
+    padding: 2px 6px;
+    border: 1px solid var(--color-accent);
+    background: var(--background-fill-primary);
+    color: var(--body-text-color);
+    font-size: 11px;
+}
+
+/* コマページの編集画面の上部バーのページ名 */
+.ps-pg-name {
+    width: 140px;
+    min-width: 0;
+    padding: 3px 6px;
+    border: 1px solid var(--border-color-primary);
+    border-radius: 4px;
+    background: var(--input-background-fill, var(--background-fill-primary));
+    color: var(--body-text-color);
+    font-size: 12px;
+}
+
 #mtm-fs .ps-book-remove {
     position: absolute;
     right: 4px;

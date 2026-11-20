@@ -431,6 +431,7 @@
                     <button type="button" class="mtm-btn ps-pg-back">← Book</button>
                     <span class="mtm-fs-title">コマページ</span>
                     <span class="mtm-fs-target ps-pg-where" title="キャンバスの上でホイールを回すか PageUp・PageDown で、Book の前後のコマページに移ります"></span>
+                    <input type="text" class="ps-pg-name" placeholder="ページの名前" maxlength="40" title="編集中のコマページの名前（Book の一覧やコマの印に出ます）">
                     <span class="ps-pg-group ps-pg-counts" title="並べて表示するコマページの枚数。右から Book の順に並びます（漫画の見開きと同じ）。編集するのは枠の付いたページで、ほかのページはクリックすると編集できます">
                         <span class="ps-pg-label">表示</span>
                         ${PAGE_COUNTS.map((n) => `<button type="button" class="mtm-btn" data-count="${n}">${n} 枚</button>`).join("")}
@@ -591,6 +592,21 @@
             const toProject = ed.opts.onProject;
             close();
             if (toProject) toProject();
+        });
+        // コマページの名前。決めたら（Enter か外を押す）保存する。並べて表示している枠の番号にも出す
+        const nameInput = q(".ps-pg-name");
+        nameInput.addEventListener("change", () => {
+            if (!ed) return;
+            const name = nameInput.value.trim();
+            if (name === (ed.page.name || "")) return;
+            if (name) ed.page.name = name;
+            else delete ed.page.name;
+            renderSlots();
+            render();
+            ed.opts.onChange();
+        });
+        nameInput.addEventListener("keydown", (e) => {
+            if (e.key === "Enter" && !e.isComposing) nameInput.blur();
         });
         q(".ps-pg-undo").addEventListener("click", undo);
         q(".ps-pg-redo").addEventListener("click", redo);
@@ -1745,7 +1761,7 @@
             const active = page === ed.page;
             const slot = el("div", {class: "ps-pg-slot" + (active ? " ps-pg-slot-active" : "")});
             if (n > 1) {
-                slot.appendChild(el("span", {class: "ps-pg-slot-no", text: String(i + 1).padStart(width, "0") + (active ? "  編集中" : "")}));
+                slot.appendChild(el("span", {class: "ps-pg-slot-no", text: String(i + 1).padStart(width, "0") + (page.name ? `  ${page.name}` : "") + (active ? "  編集中" : "")}));
             }
             if (active) {
                 slot.appendChild(svg);
@@ -2057,6 +2073,8 @@
         renderSfxPalette();
         q(".ps-pg-stage").dataset.tool = prefs.tool;
         q(".ps-pg-where").textContent = ed.opts.title(ed.page);
+        const nameInput = q(".ps-pg-name");
+        if (document.activeElement !== nameInput) nameInput.value = ed.page.name || "";
         const project = q(".ps-pg-project");
         project.textContent = `← プロジェクト「${ed.opts.projectTitle ? ed.opts.projectTitle() : ""}」へ戻る`;
         project.classList.toggle("ps-off", !ed.opts.onProject);
