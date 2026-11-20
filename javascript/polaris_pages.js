@@ -21,7 +21,7 @@
     const PREFS_KEY = "polaris-studio:page-tools";
     const RECT_HANDLES = ["nw", "n", "ne", "e", "se", "s", "sw", "w"];
     const HINTS = {
-        select: "クリックで選択、ドラッグで移動・サイズ変更。選んだ四角をもう一度クリック（またはダブルクリック）すると画像を選べます。Delete で削除、Ctrl+Z で元に戻す。Alt を押している間は吸着しません。重なったコマは「下を隠す」(H) で手前のコマだけの線にし、「前面へ」(])「背面へ」([) で手前にするコマを決めます。素材は角のつまみで縦横比を保って拡大・縮小（Shift で自由に）、辺のつまみで伸び縮みします。「頂点を編集」(E) では、コマの角の丸いつまみをドラッグして台形・平行四辺形などにします（Shift で水平・垂直だけ、矢印キーで 1 px ずつ）。",
+        select: "クリックで選択、ドラッグで移動・サイズ変更。選んだ四角をもう一度クリック（またはダブルクリック）すると画像を選べます。Delete で削除、Ctrl+Z で元に戻す。Alt を押している間は吸着しません。重なったコマは「下を隠す」(H) で手前のコマだけの線にし、「前面へ」(])「背面へ」([) で手前にするコマを決めます。素材は角のつまみで縦横比を保って拡大・縮小（Shift で自由に）、辺のつまみで伸び縮みします。「頂点を編集」(E) では、コマの角の丸いつまみをドラッグして台形・平行四辺形などにします（Shift で水平・垂直だけ、矢印キーで 1 px ずつ）。オノマトペは、選んでダブルクリックで「字を 1 つずつ直す」の入り・切り、Ctrl を押しながらドラッグで複製します。",
         line: "ドラッグで直線を引きます。Shift で水平・垂直。直線は分割線で、画像ははめ込めません。",
         rect: "ドラッグで四角を描きます。Shift で正方形。線「なし」にすると透明な四角（線のないコマ）になります。台形や平行四辺形は、四角を選んで「頂点を編集」(E) で角を動かして作ります。",
         tri: "ドラッグで三角を描きます（ドラッグした枠の上の辺の真ん中が頂点。上へドラッグすると逆向き）。Shift で幅と高さをそろえます。描いたあとは「頂点を編集」(E) で角を動かせます。",
@@ -1721,7 +1721,7 @@
         for (const w of list) {
             words.appendChild(el("button", {
                 type: "button", class: "mtm-btn ps-pg-sfx-word" + (active("word", w) ? " mtm-active" : ""), text: w,
-                title: `「${w}」を「${presetOf(prefs.sfxPreset).label}」の形で置きます。クリックした所に続けて置けます`,
+                title: `「${w}」を「${presetOf(prefs.sfxPreset).label}」の形で置きます。ページを左クリックで 1 つ置いて選んだ状態に、右クリックなら続けて置けます`,
                 onclick: () => (active("word", w) ? setTool("select") : startStamp("word", w)),
             }));
         }
@@ -1752,9 +1752,19 @@
     let fontCompareTimer = null;
     let fontCompareAt = 0;
 
+    // 並びは編集画面を開いている間は変えない（フォントを選んでも先頭に動かない）。はじめて出すフォントは後ろに足す
+    let fontCompareOrder = [];
+
     function compareFonts(current) {
-        const ids = [current, ...prefs.fontFavorites, ...(fontList || []).filter((f) => f.added).map((f) => f.id), ...prefs.fontRecent];
-        return [...new Set(ids)].filter((id) => id === current || (!fontCompareHidden.has(id) && fontOf(id))).slice(0, FONT_COMPARE_MAX);
+        // 一度出したフォントも残す（元のフォントに戻せるように）
+        const ids = [...fontCompareOrder, ...prefs.fontFavorites, ...(fontList || []).filter((f) => f.added).map((f) => f.id), ...prefs.fontRecent, current];
+        const wanted = new Set(ids.filter((id) => id === current || (!fontCompareHidden.has(id) && fontOf(id))));
+        for (const id of wanted) if (!fontCompareOrder.includes(id)) fontCompareOrder.push(id);
+        const list = fontCompareOrder.filter((id) => wanted.has(id));
+        // 多すぎるときも今のフォントは残す
+        const shown = list.slice(0, FONT_COMPARE_MAX);
+        if (!shown.includes(current)) shown[shown.length - 1] = current;
+        return shown;
     }
 
     // つまみを動かしている間は何度も呼ばれるので、作り直すのは少し間をあけてから
@@ -2039,6 +2049,7 @@
         ed = {page: opts.page, opts, sel: null, undo: [], redo: [], start: 0};
         // フォント別の見本から外したフォントは、編集画面を開き直したら戻す
         fontCompareHidden.clear();
+        fontCompareOrder = [];
         fontCompareSig = "";
         if (prefs.tool === "sfx" && !stampSource) prefs.tool = "select";
         if (prefs.sfxOpen) loadSfxLibrary();
@@ -2167,6 +2178,7 @@
     let activeBalloonVertex = -1;   // 矢印キーで動かすフキダシの頂点（最後に触った頂点）
     let lastBalloonPress = {i: -1, id: "", at: 0};  // 頂点のダブルクリックを見分けるための、前に押した頂点と時刻
     const DOUBLE_PRESS = 400;
+    let lastSfxClick = {id: "", at: 0};     // オノマトペのダブルクリックを見分けるための、前にクリックしたオノマトペと時刻
 
     // フキダシを付ける・外す（選んだセリフかオノマトペ）
     function toggleBalloon() {
@@ -2323,9 +2335,7 @@
         if (document.activeElement !== q(".ps-pg-w")) q(".ps-pg-w").value = ed.page.width;
         if (document.activeElement !== q(".ps-pg-h")) q(".ps-pg-h").value = ed.page.height;
         q(".ps-pg-hint").textContent = prefs.tool === "sfx" && stampSource
-            ? (stampSource.kind === "stamp"
-                ? `調整済みスタンプ「${stampSource.params.text}」：左クリックで 1 つ置いて選んだ状態にします（そのまま調整できます）。右クリックなら置いたあとも続けて置けます${prefs.sfxVary ? "（置くたびに形が少し変わります）" : ""}。Esc か V で選択に戻ります。`
-                : `スタンプ「${stampSource.params.text}」：クリックした所に置きます。続けて置けます${prefs.sfxVary ? "（置くたびに形が少し変わります）" : ""}。Esc か V で選択に戻ります。置いたオノマトペは「選択」で選ぶと細かく調整できます。`)
+            ? `${stampSource.kind === "stamp" ? "調整済みスタンプ" : "スタンプ"}「${stampSource.params.text}」：左クリックで 1 つ置いて選んだ状態にします（そのまま調整できます）。右クリックなら置いたあとも続けて置けます${prefs.sfxVary ? "（置くたびに形が少し変わります）" : ""}。Esc か V で選択に戻ります。`
             : balloonEdit && s && s.balloon
                 ? "フキダシの頂点を編集します：丸をドラッグで動かす（Shift で水平か垂直だけ）、辺の真ん中の小さな丸をドラッグで頂点を足す（20 個まで）、頂点をダブルクリックで消す。矢印キーで最後に触った頂点を 1 px（Shift で 10 px）。"
             : vertexMode && s && s.type === "sfx"
@@ -2555,12 +2565,11 @@
     function pointerDown(e) {
         if (!ed) return;
         // スタンプモード：クリックした所にオノマトペを置く。
-        // 調整済みスタンプは、左クリックで 1 つ置いて選んだ状態にし（すぐ調整できる）、右クリックなら置いたあともスタンプを続ける。
-        // 文字列のスタンプは、どちらのボタンでも続けて置ける
+        // 文字列のスタンプも調整済みスタンプも、左クリックで 1 つ置いて選んだ状態にし（すぐ調整できる）、右クリックなら置いたあともスタンプを続ける
         if (prefs.tool === "sfx" && (e.button === 0 || e.button === 2)) {
             e.preventDefault();
             finishTextEdit(true);
-            const once = e.button === 0 && stampSource && stampSource.kind === "stamp";
+            const once = e.button === 0 && !!stampSource;
             placeStamp(inPage(toPage(e))).then((s) => {
                 if (!once || !s || !ed || !shapeOf(s.id)) return;
                 setTool("select");
@@ -2643,7 +2652,16 @@
                 drag.kind = "move";
                 drag.id = hit.dataset.id;
                 drag.wasSelected = ed.sel === drag.id;
-                if (!drag.wasSelected) select(drag.id);
+                const src = shapeOf(drag.id);
+                if ((e.ctrlKey || e.metaKey) && src && src.type === "sfx") {
+                    // Ctrl を押しながらドラッグで複製する。複製をいちばん手前に足して、それを動かす（動かさなければ足さない）
+                    const copy = {...JSON.parse(JSON.stringify(src)), id: newId()};
+                    ed.page.shapes.push(copy);
+                    drag.dupOf = src.id;
+                    drag.id = copy.id;
+                    drag.wasSelected = false;
+                    select(copy.id);
+                } else if (!drag.wasSelected) select(drag.id);
             } else {
                 drag = null;
                 if (ed.sel) select(null);
@@ -2892,9 +2910,25 @@
             }
             return;
         }
+        // Ctrl+クリックだけ（動かさなかった）なら、複製は足さずに元のオノマトペを選ぶ
+        if (d.dupOf) {
+            ed.page.shapes = ed.page.shapes.filter((x) => x.id !== d.id);
+            select(d.dupOf);
+            return;
+        }
         // 選んであった四角をもう一度クリックしたら、はめ込む画像を選ぶ
         // 選んであったセリフをもう一度クリックしたら、文字を直す
         const s = shapeOf(d.id);
+        // 選んでいるオノマトペをダブルクリックしたら、字を 1 つずつ直す の入り・切りを切り替える。
+        // ドラッグのために押した所を捕まえているので、dblclick はキャンバス全体に届いてしまい、どの図形か分からない。押した間隔で見分ける
+        // 字の手直し中は字が枠のほとんどを覆うので、字をダブルクリックしても切る
+        const glyphPress = d.kind === "handle" && d.handle && d.handle.startsWith("gm");
+        if ((d.kind === "move" || glyphPress) && s && s.type === "sfx") {
+            const now = Date.now();
+            const twice = (d.wasSelected || glyphPress) && lastSfxClick.id === s.id && now - lastSfxClick.at < DOUBLE_PRESS;
+            lastSfxClick = twice ? {id: "", at: 0} : {id: s.id, at: now};
+            if (twice) toggleVertexMode();
+        }
         if (d.kind === "move" && d.wasSelected && s && s.type === "rect") openPicker(s);
         if (d.kind === "move" && d.wasSelected && s && s.type === "text") startTextEdit(s, null);
     }
