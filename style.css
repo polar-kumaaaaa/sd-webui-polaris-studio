@@ -1030,6 +1030,52 @@ body.mtm-fs-open {
     background: #dc2626;
 }
 
+/* Ctrl+クリック・Shift+クリックで選んだサムネイル */
+.ps-ed-thumb.ps-selected {
+    border-color: var(--color-accent);
+    box-shadow: 0 0 0 2px var(--color-accent);
+}
+
+.ps-ed-thumb.ps-selected img {
+    opacity: 0.75;
+}
+
+.ps-ed-thumb-check {
+    position: absolute;
+    left: 3px;
+    top: 3px;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: var(--color-accent);
+    color: #fff;
+    font-size: 12px;
+    font-weight: 700;
+    line-height: 18px;
+    text-align: center;
+}
+
+/* キー画像の印と重ならないよう、選んでいるときはキーの印を下げる */
+.ps-ed-thumb.ps-selected .ps-thumb-mark {
+    top: 24px;
+}
+
+/* 選んでいるときに上段の右に出す枚数と操作 */
+.ps-ed-thumbs-sel {
+    flex: none;
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 6px;
+    margin-left: auto;
+    font-size: 12px;
+}
+
+.ps-ed-thumbs-sel-count {
+    text-align: center;
+    font-weight: 600;
+}
+
 .ps-ed-thumbs .ps-stack-count {
     bottom: -16px;
     font-size: 10px;
@@ -1608,11 +1654,31 @@ body.mtm-fs-open {
     color: #db2777;
 }
 
-/* ビューワーの名前の右の印（コマで使っている印・お気に入り） */
+/* ビューワーの画像の左上に重ねる印（コマで使っている印・お気に入り）。位置は JS で画像に合わせる */
 .ps-viewer-marks {
+    position: absolute;
+    left: 10px;
+    top: 10px;
+    z-index: 1;
     display: flex;
     align-items: center;
-    gap: 4px;
+    gap: 6px;
+    pointer-events: none;
+}
+
+.ps-viewer-marks > span {
+    height: 26px;
+    padding: 0 9px;
+    border-radius: 13px;
+    font-size: 15px;
+    line-height: 26px;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.6);
+    pointer-events: auto;
+}
+
+.ps-viewer-marks .ps-thumb-panel svg {
+    width: 16px;
+    height: 16px;
 }
 
 .ps-viewer-marks:empty {

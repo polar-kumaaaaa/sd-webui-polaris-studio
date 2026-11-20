@@ -303,7 +303,9 @@
 
     let fs = null;
     let fsTab = "txt2img";
-    let editor = null;              // 編集中の {project, cut, onChange, onPreview, onQueue, onQueues, onClose, images, thumbUrl, keyImage, openImage, deleteImage, marks}
+    let editor = null;              // 編集中の {project, cut, onChange, onPreview, onQueue, onQueues, onClose, images, thumbUrl, keyImage, openImage, deleteImages, marks}
+    const thumbSel = new Set();     // 上段で選んでいる画像の名前
+    let thumbAnchor = "";           // Shift+クリックで範囲を選ぶときの起点
     let fsPicks = [];               // 追加したタグ（カードの id）の並び
     let fsPicksInitial = [];        // 開いた時点（保存した時点）の並び
     let fsLeftSel = null;           // 左で選んでいるカードの id
@@ -582,6 +584,8 @@
 
     function openEditor(options) {
         editor = options;
+        thumbSel.clear();
+        thumbAnchor = "";
         categories = editor.project.categories;
         entries = editor.project.entries;
         fq(".mtm-fs-search").value = "";
@@ -1145,21 +1149,31 @@
             return;
         }
         const key = editor.keyImage();
+        const canDelete = !!editor.deleteImages;
+        // 消えた画像は選択から外す
+        const names = new Set(images.map((x) => x.name));
+        for (const name of thumbSel) if (!names.has(name)) thumbSel.delete(name);
+        const tip = canDelete ? "\nクリック：開く／Ctrl+クリック：選択／Shift+クリック：範囲を選択" : "";
         images.forEach((image, i) => {
             const img = el("img", {src: editor.thumbUrl(image), alt: "", loading: "lazy", draggable: "false"});
+            const selected = thumbSel.has(image.name);
             // 中に削除のボタンを置くので、サムネイル自体はボタンにせず、クリックと Enter で開く
-            const thumb = el("div", {class: "ps-ed-thumb", role: "button", tabindex: "0", title: image.name}, [
+            const thumb = el("div", {class: "ps-ed-thumb" + (selected ? " ps-selected" : ""), role: "button", tabindex: "0", title: image.name + tip}, [
                 img,
                 ...(image === key ? [el("span", {class: "ps-thumb-mark", text: "キー"})] : []),
                 el("span", {class: "ps-ed-thumb-no", text: String(i + 1)}),
                 ...(editor.marks ? editor.marks(image) : []),
-                ...(editor.deleteImage ? [el("button", {type: "button", class: "ps-ed-thumb-del", text: "✕", title: "この画像を削除（実ファイルごと。確認が出ます）",
+                ...(selected ? [el("span", {class: "ps-ed-thumb-check", text: "✓"})] : []),
+                ...(canDelete ? [el("button", {type: "button", class: "ps-ed-thumb-del", text: "✕", title: "この画像を削除（実ファイルごと。確認が出ます）",
                     onclick: (e) => {
                         e.stopPropagation();
-                        editor.deleteImage(image);
+                        editor.deleteImages([image]);
                     }})] : []),
             ]);
-            thumb.addEventListener("click", () => editor.openImage(image));
+            thumb.addEventListener("click", (e) => {
+                if (canDelete && (e.shiftKey || e.ctrlKey || e.metaKey)) selectThumb(images, image, e.shiftKey);
+                else editor.openImage(image);
+            });
             thumb.addEventListener("keydown", (e) => {
                 if (e.target !== thumb || (e.key !== "Enter" && e.key !== " ")) return;
                 e.preventDefault();
@@ -1167,13 +1181,43 @@
             });
             box.appendChild(thumb);
         });
+        if (thumbSel.size) {
+            box.appendChild(el("div", {class: "ps-ed-thumbs-sel"}, [
+                el("span", {class: "ps-ed-thumbs-sel-count", text: `${thumbSel.size} 枚を選択中`}),
+                el("button", {type: "button", class: "mtm-btn mtm-danger ps-ed-thumbs-sel-delete", text: "選択を削除",
+                    onclick: () => editor.deleteImages(images.filter((x) => thumbSel.has(x.name)))}),
+                el("button", {type: "button", class: "mtm-btn ps-ed-thumbs-sel-clear", text: "選択を解除", onclick: clearThumbSel}),
+            ]));
+        }
         stackThumbs();
+    }
+
+    // Ctrl+クリックは 1 枚ずつ選択・解除、Shift+クリックは前に選んだ画像からここまでを選択に加える
+    function selectThumb(images, image, range) {
+        const list = images.map((x) => x.name);
+        const from = list.indexOf(thumbAnchor);
+        if (range && from >= 0) {
+            const to = list.indexOf(image.name);
+            for (let i = Math.min(from, to); i <= Math.max(from, to); i++) thumbSel.add(list[i]);
+        } else if (thumbSel.has(image.name)) {
+            thumbSel.delete(image.name);
+        } else {
+            thumbSel.add(image.name);
+        }
+        thumbAnchor = image.name;
+        renderThumbs();
+    }
+
+    function clearThumbSel() {
+        thumbSel.clear();
+        thumbAnchor = "";
+        renderThumbs();
     }
 
     function stackThumbs() {
         if (!editor) return;
         const box = fq(".ps-ed-thumbs");
-        stackOverflow(box, [...box.querySelectorAll(".ps-ed-thumb")], {label: (n) => `ほか ${n} 枚`});
+        stackOverflow(box, [...box.querySelectorAll(".ps-ed-thumb")], {before: box.querySelector(".ps-ed-thumbs-sel"), label: (n) => `ほか ${n} 枚`});
     }
 
     // ---------- カードの登録・編集・削除 ----------

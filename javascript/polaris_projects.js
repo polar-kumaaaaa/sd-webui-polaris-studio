@@ -274,7 +274,6 @@
             <div class="ps-viewer ps-off">
                 <div class="ps-viewer-bar">
                     <span class="ps-viewer-name"></span>
-                    <span class="ps-viewer-marks"></span>
                     <span class="mtm-fs-spacer"></span>
                     <button type="button" class="mtm-btn ps-zoom-out" title="縮小">－</button>
                     <span class="ps-viewer-size"></span>
@@ -294,6 +293,7 @@
                     <div class="ps-viewer-center">
                         <button type="button" class="ps-nav ps-nav-prev" title="前の画像 (←)">‹</button>
                         <div class="ps-viewer-stage"><img class="ps-viewer-image" alt=""></div>
+                        <span class="ps-viewer-marks"></span>
                         <button type="button" class="ps-nav ps-nav-next" title="次の画像 (→)">›</button>
                     </div>
                     <div class="ps-viewer-info ps-off"></div>
@@ -421,6 +421,7 @@
         });
         q(".ps-viewer-image").addEventListener("load", applyZoom);
         q(".ps-viewer-stage").addEventListener("wheel", wheelViewer, {passive: false});
+        q(".ps-viewer-stage").addEventListener("scroll", placeViewMarks, {passive: true});
         window.addEventListener("resize", () => {
             if (isOpen(".ps-viewer")) applyZoom();
         });
@@ -2562,7 +2563,8 @@
         else img.src = url;
     }
 
-    // 名前の右に、コマで使っている印とお気に入りの印を出す（サムネイルと同じもの）。お気に入りのボタンの表示もそろえる
+    // 画像の左上に、コマで使っている印とお気に入りの印を重ねる（サムネイルと同じもの）。お気に入りのボタンの表示もそろえる。
+    // 画面を広げると上のバーまで目が届きにくいので、画像の上に出す
     function renderViewMarks() {
         const key = selKey(viewCut, viewImage.name);
         const panels = panelPages(key, project.books, true);
@@ -2574,6 +2576,19 @@
         const button = q(".ps-view-fav");
         button.textContent = fav ? "♥ お気に入り" : "♡ お気に入り";
         button.classList.toggle("ps-view-fav-on", fav);
+        placeViewMarks();
+    }
+
+    // 画像の見えている範囲の左上に合わせる。拡大してはみ出しているときは、枠の左上に置く
+    function placeViewMarks() {
+        const box = q(".ps-viewer-marks");
+        const img = q(".ps-viewer-image");
+        if (!box.childElementCount || !img.naturalWidth) return;
+        const c = q(".ps-viewer-center").getBoundingClientRect();
+        const s = q(".ps-viewer-stage").getBoundingClientRect();
+        const r = img.getBoundingClientRect();
+        box.style.left = Math.round(Math.max(r.left, s.left) - c.left + 10) + "px";
+        box.style.top = Math.round(Math.max(r.top, s.top) - c.top + 10) + "px";
     }
 
     async function toggleViewFavorite() {
@@ -2605,6 +2620,7 @@
         img.style.width = Math.round(img.naturalWidth * zoom) + "px";
         img.style.height = Math.round(img.naturalHeight * zoom) + "px";
         q(".ps-viewer-size").textContent = Math.round(zoom * 100) + "%";
+        placeViewMarks();
     }
 
     function setZoom(value) {
@@ -2758,7 +2774,7 @@
             keyImage: () => keyImageOf(project, cut),
             openImage: (image) => openViewerFor(cut, image),
             // 上段のサムネイルの ✕。サムネイル一覧の削除と同じ確認を出す
-            deleteImage: (image) => askDeleteImages([selKey(cut, image.name)], "画像を削除"),
+            deleteImages: (images) => askDeleteImages(images.map((x) => selKey(cut, x.name)), images.length > 1 ? "選択した画像を削除" : "画像を削除"),
             // 上段のサムネイルの左下の印（サムネイル一覧と同じ、コマとお気に入り）
             marks: (image) => thumbMarks(panelPages(selKey(cut, image.name), project.books, true), isFavorite(cut, image.name)),
             onClose() {
