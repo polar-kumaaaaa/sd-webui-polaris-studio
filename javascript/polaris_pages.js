@@ -428,10 +428,12 @@
     // fontFavorites は ★ を付けたフォント、fontRecent は最近使ったフォント（新しい順）、fontFilter はフォント選びの絞り込み
     const prefs = {tool: "rect", line: 4, rect: 4, cropMode: "cover", favOnly: false, count: 1, text: {...TEXT_DEFAULT},
         fontFavorites: [], fontRecent: [], fontFilter: "all",
-        // オノマトペ：パレットを開いているか、文字列のスタンプのひな形・フォント・大きさ、置くたびに形を変えるか
-        sfxOpen: false, sfxPreset: "impact", sfxFont: "", sfxSize: 140, sfxVary: true,
+        // オノマトペ：パレットを開いているか、文字列のスタンプのフォント・大きさ、置くたびに形を変えるか
+        sfxOpen: false, sfxFont: "", sfxSize: 140, sfxVary: true,
         // オノマトペの調整で、フォント別の見本の枠を開いているか
-        sfxFontsOpen: false};
+        sfxFontsOpen: false,
+        // フォント別の見本の枠をピンで固定しているか（オノマトペを選んでいないときも出しておく）
+        sfxFontsPinned: false};
     const PAGE_COUNTS = [1, 2, 3];
 
     const q = (sel) => view.querySelector(sel);
@@ -459,11 +461,11 @@
             if (saved.favOnly === true) prefs.favOnly = true;
             if (PAGE_COUNTS.includes(saved.count)) prefs.count = saved.count;
             prefs.sfxOpen = saved.sfxOpen === true;
-            if (window.PolarisSfx && PolarisSfx.PRESETS.some((x) => x.key === saved.sfxPreset)) prefs.sfxPreset = saved.sfxPreset;
             if (typeof saved.sfxFont === "string") prefs.sfxFont = saved.sfxFont;
             if (isNum(saved.sfxSize)) prefs.sfxSize = clamp(Math.round(saved.sfxSize), 8, 2000);
             prefs.sfxVary = saved.sfxVary !== false;
             prefs.sfxFontsOpen = saved.sfxFontsOpen === true;
+            prefs.sfxFontsPinned = saved.sfxFontsPinned === true;
         } catch (e) { /* 覚えていなくても既定で使える */ }
     }
 
@@ -575,6 +577,7 @@
                         <span class="ps-pg-fontside-count"></span>
                         <span class="mtm-fs-spacer"></span>
                         <button type="button" class="mtm-btn ps-pg-sfx-fonts-restore" title="外したフォントを一覧に戻します"></button>
+                        <button type="button" class="mtm-icon ps-pg-fontside-pin" title="ピンで固定：オノマトペを選んでいないときも枠を出したままにします（ページの位置が動かなくなります）">📌</button>
                         <button type="button" class="mtm-icon ps-pg-fontside-close" title="閉じる">✕</button>
                     </div>
                     <div class="ps-pg-fontside-note">★ を付けた・追加した・最近使ったフォントで、今の形を描いた見本です。押すとそのフォントに、＋ で調整済みスタンプに登録、✕ で一覧から外します（編集画面を閉じると戻ります）。</div>
@@ -588,8 +591,7 @@
                     </div>
                     <div class="ps-pg-sfx-scroll">
                         <div class="ps-pg-sfx-palette">
-                            <div class="ps-pg-sfx-label">ひな形 <span class="ps-pg-sfx-note">文字列のスタンプの形の傾向</span></div>
-                            <div class="ps-pg-sfx-presets"></div>
+                            <div class="ps-pg-sfx-label">文字列のスタンプ <span class="ps-pg-sfx-note">フォントと大きさ</span></div>
                             <div class="ps-pg-sfx-row">
                                 <button type="button" class="mtm-btn ps-pg-sfx-font" data-font-target="sfx-new" title="文字列のスタンプに使うフォント"></button>
                                 <label title="文字列のスタンプの字の大きさ（ページのピクセル）">大きさ <input type="number" class="ps-pg-sfx-newsize" min="8" max="2000" step="1"></label>
@@ -1293,7 +1295,6 @@
     };
     const sortedStamps = () => sfxLib.stamps.slice().sort((a, b) => kanaOrder.compare(a.params.text || "", b.params.text || ""));
     const isSfxOpen = () => view && !q(".ps-pg-sfx").classList.contains("ps-off");
-    const presetOf = (key) => SFX().PRESETS.find((x) => x.key === key) || SFX().PRESETS[0];
     const cloneParams = (p) => JSON.parse(JSON.stringify(p));
 
     // 詳細の調整のつまみ [設定の場所, 表示, 最小, 最大, 刻み, 単位, 説明]
@@ -1356,16 +1357,6 @@
         if (!SFX()) return;
         q(".ps-pg-sfx-toggle").addEventListener("click", () => toggleSfxPalette());
         q(".ps-pg-sfx-close").addEventListener("click", () => toggleSfxPalette(false));
-        q(".ps-pg-sfx-presets").append(...SFX().PRESETS.map((x) => el("button", {
-            type: "button", class: "mtm-btn", "data-sfx-preset": x.key, title: x.title, text: x.label,
-            onclick: () => {
-                prefs.sfxPreset = x.key;
-                savePrefs();
-                // 文字列のスタンプを持っているなら、新しいひな形で持ち直す
-                if (stampSource && stampSource.kind === "word") startStamp("word", stampSource.id);
-                renderSfxPalette();
-            },
-        })));
         q(".ps-pg-sfx-font").addEventListener("click", (e) => (isFontPickerOpen() ? closeFontPicker() : openFontPicker(e.currentTarget, "sfx-new")));
         const size = q(".ps-pg-sfx-newsize");
         size.addEventListener("change", () => {
@@ -1397,6 +1388,12 @@
         });
         buildSfxDetail();
         q(".ps-pg-fontside-close").addEventListener("click", () => toggleFontSide(false));
+        q(".ps-pg-fontside-pin").addEventListener("click", () => {
+            prefs.sfxFontsPinned = !prefs.sfxFontsPinned;
+            savePrefs();
+            if (ed) render();
+            refocus();
+        });
         q(".ps-pg-sfx-fonts-restore").addEventListener("click", () => {
             fontCompareHidden.clear();
             fontCompareSig = "";
@@ -1495,9 +1492,6 @@
                     ]),
                 ]),
             ]),
-            el("div", {class: "ps-pg-sfx-row ps-pg-sfx-presets ps-pg-sfx-apply", title: "ひな形の形・ゆらぎ・塗りに置き換えます（文字・フォント・大きさはそのまま）"},
-                SFX().PRESETS.map((x) => el("button", {type: "button", class: "mtm-btn", text: x.label, title: x.title + "\n（文字・フォント・大きさはそのまま）",
-                    onclick: () => editSfx((p) => Object.assign(p, cloneParams(x.params)), true)}))),
             ...fields,
             el("div", {class: "ps-pg-sfx-row ps-pg-sfx-colors"}, [
                 el("label", {title: "字の色"}, [el("span", {text: "塗り"}), el("input", {type: "color", "data-sfx-color": "fill"})]),
@@ -1590,9 +1584,9 @@
         refocus();
     }
 
-    // 文字列のスタンプの設定（ひな形 ＋ フォント・大きさ）
+    // 文字列のスタンプの設定（既定の形 ＋ フォント・大きさ）
     function wordParams(word) {
-        return SFX().clean({...cloneParams(presetOf(prefs.sfxPreset).params), text: word, font: prefs.sfxFont, size: prefs.sfxSize, seed: SFX().randomSeed()});
+        return SFX().clean({text: word, font: prefs.sfxFont, size: prefs.sfxSize, seed: SFX().randomSeed()});
     }
 
     // スタンプモードにする。kind は "word"（id は文字列）か "stamp"（id は調整済みスタンプの id）
@@ -1705,11 +1699,10 @@
             return;
         }
         // 図形を動かすたびに描き直さないよう、パレットの中身が変わったときだけ作り直す
-        const sig = JSON.stringify([sfxLib, sfxLibLoaded, prefs.sfxPreset, prefs.sfxFont, prefs.sfxSize, prefs.sfxVary, !!fontList,
+        const sig = JSON.stringify([sfxLib, sfxLibLoaded, prefs.sfxFont, prefs.sfxSize, prefs.sfxVary, !!fontList,
             prefs.tool === "sfx" && stampSource ? [stampSource.kind, stampSource.id] : null, sfxLoads]);
         if (sig === sfxPaletteSig) return;
         sfxPaletteSig = sig;
-        view.querySelectorAll(".ps-pg-sfx-palette [data-sfx-preset]").forEach((b) => b.classList.toggle("mtm-active", b.dataset.sfxPreset === prefs.sfxPreset));
         const font = q(".ps-pg-sfx-font");
         font.textContent = fontName(prefs.sfxFont) + " ▾";
         if (document.activeElement !== q(".ps-pg-sfx-newsize")) q(".ps-pg-sfx-newsize").value = prefs.sfxSize;
@@ -1724,7 +1717,7 @@
         for (const w of list) {
             words.appendChild(el("button", {
                 type: "button", class: "mtm-btn ps-pg-sfx-word" + (active("word", w) ? " mtm-active" : ""), text: w,
-                title: `「${w}」を「${presetOf(prefs.sfxPreset).label}」の形で置きます。ページを左クリックで 1 つ置いて選んだ状態に、右クリックなら続けて置けます`,
+                title: `「${w}」を置きます。ページを左クリックで 1 つ置いて選んだ状態に、右クリックなら続けて置けます`,
                 onclick: () => (active("word", w) ? setTool("select") : startStamp("word", w)),
             }));
         }
@@ -1782,12 +1775,22 @@
         refocus();
     }
 
-    // 枠を出すのは、パレットを開いていてオノマトペを選んでいるときだけ
+    // 枠を出すのは、パレットを開いていてオノマトペを選んでいるとき。ピンで固定していれば、選んでいなくても空の枠を出しておく
     function updateFontSide() {
         const s = ed && selected();
-        const show = !!(prefs.sfxFontsOpen && prefs.sfxOpen && SFX() && s && s.type === "sfx");
+        const isSfx = !!(s && s.type === "sfx");
+        const show = !!(prefs.sfxFontsOpen && prefs.sfxOpen && SFX() && (isSfx || prefs.sfxFontsPinned));
         q(".ps-pg-fontside").classList.toggle("ps-off", !show);
+        q(".ps-pg-fontside-pin").classList.toggle("ps-on", !!prefs.sfxFontsPinned);
         q(".ps-pg-sfx-fonts-toggle").classList.toggle("mtm-active", !!prefs.sfxFontsOpen);
+        if (show && !isSfx && fontCompareSig !== "empty") {
+            fontCompareSig = "empty";
+            const grid = q(".ps-pg-sfx-fonts-grid");
+            grid.textContent = "";
+            grid.appendChild(el("div", {class: "mtm-empty", text: "置いたオノマトペを選ぶと、フォント別の見本がここに並びます。"}));
+            q(".ps-pg-fontside-count").textContent = "";
+            q(".ps-pg-sfx-fonts-restore").classList.add("ps-off");
+        }
     }
 
     // つまみを動かしている間は何度も呼ばれるので、作り直すのは少し間をあけてから

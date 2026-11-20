@@ -2672,12 +2672,6 @@ body.mtm-fs-open {
     width: 64px;
 }
 
-.ps-pg-sfx-presets {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 4px;
-}
-
 .ps-pg-sfx-check {
     display: flex;
     align-items: center;
@@ -2795,6 +2789,18 @@ body.mtm-fs-open {
         transform: none;
         opacity: 1;
     }
+}
+
+/* ピンは固定していないとき薄く、固定したら色付きの地にする */
+#mtm-fs .ps-pg-fontside-pin {
+    opacity: 0.45;
+    filter: grayscale(1);
+}
+
+#mtm-fs .ps-pg-fontside-pin.ps-on {
+    opacity: 1;
+    filter: none;
+    background: var(--color-accent-soft, rgba(255, 124, 0, 0.2));
 }
 
 .ps-pg-fontside-count {
