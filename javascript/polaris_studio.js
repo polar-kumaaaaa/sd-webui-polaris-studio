@@ -303,7 +303,7 @@
 
     let fs = null;
     let fsTab = "txt2img";
-    let editor = null;              // 編集中の {project, cut, onChange, onPreview, onQueue, onQueues, onClose, images, thumbUrl, keyImage, openImage}
+    let editor = null;              // 編集中の {project, cut, onChange, onPreview, onQueue, onQueues, onClose, images, thumbUrl, keyImage, openImage, deleteImage}
     let fsPicks = [];               // 追加したタグ（カードの id）の並び
     let fsPicksInitial = [];        // 開いた時点（保存した時点）の並び
     let fsLeftSel = null;           // 左で選んでいるカードの id
@@ -1147,11 +1147,24 @@
         const key = editor.keyImage();
         images.forEach((image, i) => {
             const img = el("img", {src: editor.thumbUrl(image), alt: "", loading: "lazy", draggable: "false"});
-            box.appendChild(el("button", {type: "button", class: "ps-ed-thumb", title: image.name, onclick: () => editor.openImage(image)}, [
+            // 中に削除のボタンを置くので、サムネイル自体はボタンにせず、クリックと Enter で開く
+            const thumb = el("div", {class: "ps-ed-thumb", role: "button", tabindex: "0", title: image.name}, [
                 img,
                 ...(image === key ? [el("span", {class: "ps-thumb-mark", text: "キー"})] : []),
                 el("span", {class: "ps-ed-thumb-no", text: String(i + 1)}),
-            ]));
+                ...(editor.deleteImage ? [el("button", {type: "button", class: "ps-ed-thumb-del", text: "✕", title: "この画像を削除（実ファイルごと。確認が出ます）",
+                    onclick: (e) => {
+                        e.stopPropagation();
+                        editor.deleteImage(image);
+                    }})] : []),
+            ]);
+            thumb.addEventListener("click", () => editor.openImage(image));
+            thumb.addEventListener("keydown", (e) => {
+                if (e.target !== thumb || (e.key !== "Enter" && e.key !== " ")) return;
+                e.preventDefault();
+                editor.openImage(image);
+            });
+            box.appendChild(thumb);
         });
         stackThumbs();
     }

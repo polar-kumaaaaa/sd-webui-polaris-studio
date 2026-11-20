@@ -997,6 +997,33 @@ body.mtm-fs-open {
     font-size: 10px;
 }
 
+/* サムネイルの削除。マウスを乗せたときだけ出す */
+.ps-ed-thumb-del {
+    position: absolute;
+    right: 3px;
+    top: 3px;
+    width: 20px;
+    height: 20px;
+    padding: 0;
+    border: none;
+    border-radius: 4px;
+    background: rgba(0, 0, 0, 0.6);
+    color: #fff;
+    font-size: 11px;
+    line-height: 20px;
+    cursor: pointer;
+    opacity: 0;
+}
+
+.ps-ed-thumb:hover .ps-ed-thumb-del,
+.ps-ed-thumb:focus-within .ps-ed-thumb-del {
+    opacity: 1;
+}
+
+.ps-ed-thumb-del:hover {
+    background: #dc2626;
+}
+
 .ps-ed-thumbs .ps-stack-count {
     bottom: -16px;
     font-size: 10px;

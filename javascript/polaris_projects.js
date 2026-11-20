@@ -2465,7 +2465,8 @@
         keys.forEach((k) => selectedImages.delete(k));
         removeFromBooks((r) => keys.includes(refKey(r)));
         removeFavorites(keys);
-        renderGallery();
+        // 編集画面の上段から消したときは、サムネイル一覧を開いていない
+        if (galleryCut) renderGallery();
         refreshViews();
         if (isOpen(".ps-viewer")) {
             // 前後の移動に使う一覧も作り直す。古い一覧のままだと、消した画像に戻れてしまう
@@ -2750,6 +2751,8 @@
             thumbUrl: (image) => imageUrl(project, cut, image, true),
             keyImage: () => keyImageOf(project, cut),
             openImage: (image) => openViewerFor(cut, image),
+            // 上段のサムネイルの ✕。サムネイル一覧の削除と同じ確認を出す
+            deleteImage: (image) => askDeleteImages([selKey(cut, image.name)], "画像を削除"),
             onClose() {
                 closeQueueForm();
                 closeQueueManager();
