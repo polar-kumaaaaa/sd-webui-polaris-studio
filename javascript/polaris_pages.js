@@ -430,8 +430,8 @@
         fontFavorites: [], fontRecent: [], fontFilter: "all",
         // オノマトペ：パレットを開いているか、文字列のスタンプのひな形・フォント・大きさ、置くたびに形を変えるか
         sfxOpen: false, sfxPreset: "impact", sfxFont: "", sfxSize: 140, sfxVary: true,
-        // オノマトペの調整で、フォント別の見本を開いているか
-        sfxFontsOpen: true};
+        // オノマトペの調整で、フォント別の見本の枠を開いているか
+        sfxFontsOpen: false};
     const PAGE_COUNTS = [1, 2, 3];
 
     const q = (sel) => view.querySelector(sel);
@@ -463,7 +463,7 @@
             if (typeof saved.sfxFont === "string") prefs.sfxFont = saved.sfxFont;
             if (isNum(saved.sfxSize)) prefs.sfxSize = clamp(Math.round(saved.sfxSize), 8, 2000);
             prefs.sfxVary = saved.sfxVary !== false;
-            prefs.sfxFontsOpen = saved.sfxFontsOpen !== false;
+            prefs.sfxFontsOpen = saved.sfxFontsOpen === true;
         } catch (e) { /* 覚えていなくても既定で使える */ }
     }
 
@@ -569,6 +569,17 @@
             </div>
             <div class="ps-pg-body">
                 <div class="ps-pg-stage"></div>
+                <div class="ps-pg-fontside ps-off">
+                    <div class="ps-pg-sfx-head">
+                        <span>フォント別の見え方</span>
+                        <span class="ps-pg-fontside-count"></span>
+                        <span class="mtm-fs-spacer"></span>
+                        <button type="button" class="mtm-btn ps-pg-sfx-fonts-restore" title="外したフォントを一覧に戻します"></button>
+                        <button type="button" class="mtm-icon ps-pg-fontside-close" title="閉じる">✕</button>
+                    </div>
+                    <div class="ps-pg-fontside-note">★ を付けた・追加した・最近使ったフォントで、今の形を描いた見本です。押すとそのフォントに、＋ で調整済みスタンプに登録、✕ で一覧から外します（編集画面を閉じると戻ります）。</div>
+                    <div class="ps-pg-sfx-fonts-grid"></div>
+                </div>
                 <div class="ps-pg-sfx ps-off">
                     <div class="ps-pg-sfx-head">
                         <span class="ps-pg-sfx-title">オノマトペ</span>
@@ -1385,6 +1396,12 @@
             }
         });
         buildSfxDetail();
+        q(".ps-pg-fontside-close").addEventListener("click", () => toggleFontSide(false));
+        q(".ps-pg-sfx-fonts-restore").addEventListener("click", () => {
+            fontCompareHidden.clear();
+            fontCompareSig = "";
+            renderSfxPalette();
+        });
         // 字形が届いたら、枠を合わせ直して描き直す
         SFX().onLoad(() => {
             sfxLoads++;
@@ -1432,24 +1449,10 @@
                     el("button", {type: "button", class: "mtm-btn", "data-sfx-dir": "v", text: "縦", title: "縦書き"}),
                 ]),
             ]),
-            el("div", {class: "ps-pg-sfx-fonts"}, [
-                el("div", {class: "ps-pg-sfx-row"}, [
-                    el("button", {type: "button", class: "ps-pg-sfx-fonts-toggle", title: "今の形をほかのフォントで描いた見本を並べます",
-                        onclick: () => {
-                            prefs.sfxFontsOpen = !prefs.sfxFontsOpen;
-                            savePrefs();
-                            fontCompareSig = "";
-                            renderSfxPalette();
-                        }}),
-                    el("span", {class: "mtm-fs-spacer"}),
-                    el("button", {type: "button", class: "mtm-btn ps-pg-sfx-fonts-restore", title: "外したフォントを一覧に戻します",
-                        onclick: () => {
-                            fontCompareHidden.clear();
-                            fontCompareSig = "";
-                            renderSfxPalette();
-                        }}),
-                ]),
-                el("div", {class: "ps-pg-sfx-fonts-grid"}),
+            el("div", {class: "ps-pg-sfx-row"}, [
+                el("button", {type: "button", class: "mtm-btn ps-pg-sfx-fonts-toggle", text: "🔤 フォント別の見え方",
+                    title: "今の形をほかのフォントで描いた見本を、パレットの左に広げて並べます。もう一度押すと閉じます",
+                    onclick: () => toggleFontSide()}),
             ]),
             el("div", {class: "ps-pg-sfx-balloon"}, [
                 el("div", {class: "ps-pg-sfx-row"}, [
@@ -1746,7 +1749,7 @@
     // ---------- フォント別の見本 ----------
     // 選んだオノマトペを、★ を付けたフォント・追加したフォント・最近使ったフォントで描いた見本を並べる。
     // 押すとそのフォントにし、「＋」でそのフォントの形を調整済みスタンプに登録する。✕ で外したフォントは、編集画面を閉じるまで出さない
-    const FONT_COMPARE_MAX = 30;
+    // 見本はパレットの左に広げる別の枠に並べる（数の上限はない）
     const fontCompareHidden = new Set();
     let fontCompareSig = "";
     let fontCompareTimer = null;
@@ -1760,26 +1763,44 @@
         const ids = [...fontCompareOrder, ...prefs.fontFavorites, ...(fontList || []).filter((f) => f.added).map((f) => f.id), ...prefs.fontRecent, current];
         const wanted = new Set(ids.filter((id) => id === current || (!fontCompareHidden.has(id) && fontOf(id))));
         for (const id of wanted) if (!fontCompareOrder.includes(id)) fontCompareOrder.push(id);
-        const list = fontCompareOrder.filter((id) => wanted.has(id));
-        // 多すぎるときも今のフォントは残す
-        const shown = list.slice(0, FONT_COMPARE_MAX);
-        if (!shown.includes(current)) shown[shown.length - 1] = current;
-        return shown;
+        return fontCompareOrder.filter((id) => wanted.has(id));
+    }
+
+    // フォント別の見え方の枠を開く・閉じる。開いているかは覚えておき、オノマトペを選ぶたびに同じ状態で出す
+    function toggleFontSide(open) {
+        prefs.sfxFontsOpen = open === undefined ? !prefs.sfxFontsOpen : open;
+        savePrefs();
+        fontCompareSig = "";
+        const side = q(".ps-pg-fontside");
+        side.classList.remove("ps-pg-fontside-in");
+        if (prefs.sfxFontsOpen) {
+            // せり出すように出す
+            void side.offsetWidth;
+            side.classList.add("ps-pg-fontside-in");
+        }
+        if (ed) render();
+        refocus();
+    }
+
+    // 枠を出すのは、パレットを開いていてオノマトペを選んでいるときだけ
+    function updateFontSide() {
+        const s = ed && selected();
+        const show = !!(prefs.sfxFontsOpen && prefs.sfxOpen && SFX() && s && s.type === "sfx");
+        q(".ps-pg-fontside").classList.toggle("ps-off", !show);
+        q(".ps-pg-sfx-fonts-toggle").classList.toggle("mtm-active", !!prefs.sfxFontsOpen);
     }
 
     // つまみを動かしている間は何度も呼ばれるので、作り直すのは少し間をあけてから
     function renderFontCompare(s) {
-        const box = q(".ps-pg-sfx-fonts");
-        const open = prefs.sfxFontsOpen;
-        q(".ps-pg-sfx-fonts-toggle").textContent = (open ? "▾" : "▸") + " フォント別の見え方";
+        updateFontSide();
+        if (!prefs.sfxFontsOpen) return;
         const restore = q(".ps-pg-sfx-fonts-restore");
         restore.textContent = `外したフォントを戻す（${fontCompareHidden.size}）`;
-        restore.classList.toggle("ps-off", !open || !fontCompareHidden.size);
+        restore.classList.toggle("ps-off", !fontCompareHidden.size);
         const grid = q(".ps-pg-sfx-fonts-grid");
-        grid.classList.toggle("ps-off", !open);
-        if (!open) return;
         const p = SFX().clean(s.params);
         const fonts = compareFonts(p.font);
+        q(".ps-pg-fontside-count").textContent = `${fonts.length} 個`;
         const sig = JSON.stringify([s.id, {...p, font: ""}, p.font, fonts, !!fontList, sfxLoads]);
         if (sig === fontCompareSig) return;
         clearTimeout(fontCompareTimer);
@@ -2344,6 +2365,7 @@
         q(".ps-pg-sfx-toggle").classList.toggle("mtm-active", prefs.sfxOpen);
         q(".ps-pg-sfx").classList.toggle("ps-off", !prefs.sfxOpen || !SFX());
         renderSfxPalette();
+        updateFontSide();
         q(".ps-pg-stage").dataset.tool = prefs.tool;
         q(".ps-pg-where").textContent = ed.opts.title(ed.page);
         const nameInput = q(".ps-pg-name");

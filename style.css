@@ -2766,22 +2766,47 @@ body.mtm-fs-open {
     opacity: 1;
 }
 
-/* オノマトペの調整：フォント別の見本 */
-.ps-pg-sfx-fonts {
-    margin: 4px 0;
-    padding: 6px;
-    border: 1px solid var(--border-color-primary);
-    border-radius: 6px;
+/* オノマトペの調整：フォント別の見本。パレットの左にせり出す枠に並べる */
+.ps-pg-fontside {
+    flex: none;
+    width: 460px;
+    max-width: 45%;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    border-left: 1px solid var(--border-color-primary);
+    background: var(--background-fill-primary);
 }
 
-.ps-pg-sfx-fonts-toggle {
-    padding: 0;
-    border: none;
-    background: none;
-    color: var(--body-text-color);
-    font-size: 12px;
-    font-weight: 600;
-    cursor: pointer;
+.ps-pg-fontside.ps-off {
+    display: none;
+}
+
+.ps-pg-fontside.ps-pg-fontside-in {
+    animation: ps-pg-fontside-in 0.18s ease-out;
+}
+
+@keyframes ps-pg-fontside-in {
+    from {
+        transform: translateX(40px);
+        opacity: 0;
+    }
+    to {
+        transform: none;
+        opacity: 1;
+    }
+}
+
+.ps-pg-fontside-count {
+    font-size: 11px;
+    font-weight: normal;
+    color: var(--body-text-color-subdued);
+}
+
+.ps-pg-fontside-note {
+    padding: 6px 10px;
+    font-size: 11px;
+    color: var(--body-text-color-subdued);
 }
 
 #mtm-fs .ps-pg-sfx-fonts-restore {
@@ -2790,11 +2815,13 @@ body.mtm-fs-open {
 }
 
 .ps-pg-sfx-fonts-grid {
+    flex: 1;
+    min-height: 0;
     display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 6px;
-    margin-top: 6px;
-    max-height: 340px;
+    grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));
+    align-content: start;
+    gap: 8px;
+    padding: 4px 10px 16px;
     overflow-y: auto;
 }
 
