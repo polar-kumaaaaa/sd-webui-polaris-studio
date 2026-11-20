@@ -303,7 +303,7 @@
 
     let fs = null;
     let fsTab = "txt2img";
-    let editor = null;              // 編集中の {project, cut, onChange, onPreview, onQueue, onQueues, onClose, images, thumbUrl, keyImage, openImage, deleteImage}
+    let editor = null;              // 編集中の {project, cut, onChange, onPreview, onQueue, onQueues, onClose, images, thumbUrl, keyImage, openImage, deleteImage, marks}
     let fsPicks = [];               // 追加したタグ（カードの id）の並び
     let fsPicksInitial = [];        // 開いた時点（保存した時点）の並び
     let fsLeftSel = null;           // 左で選んでいるカードの id
@@ -1152,6 +1152,7 @@
                 img,
                 ...(image === key ? [el("span", {class: "ps-thumb-mark", text: "キー"})] : []),
                 el("span", {class: "ps-ed-thumb-no", text: String(i + 1)}),
+                ...(editor.marks ? editor.marks(image) : []),
                 ...(editor.deleteImage ? [el("button", {type: "button", class: "ps-ed-thumb-del", text: "✕", title: "この画像を削除（実ファイルごと。確認が出ます）",
                     onclick: (e) => {
                         e.stopPropagation();

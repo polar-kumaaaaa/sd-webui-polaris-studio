@@ -1163,6 +1163,7 @@
         else cut.favorites.push(name);
         if (isOpen(".ps-gallery-view") && galleryCut === cut) renderGallery();
         updateCutMarks(cut);
+        if (window.PolarisStudio.isEditing(cut)) window.PolarisStudio.reloadEditor();
         await saveProjects();
     }
 
@@ -1171,6 +1172,15 @@
         for (const cut of cutsOf(project)) {
             if (Array.isArray(cut.favorites)) cut.favorites = cut.favorites.filter((name) => !keys.includes(selKey(cut, name)));
         }
+    }
+
+    // サムネイルの左下の印：はめ込んでいるコマ（削除するときは確認で知らせる）と、その隣にお気に入り。なければ空の配列
+    function thumbMarks(panels, fav) {
+        if (!(panels && panels.length) && !fav) return [];
+        return [el("span", {class: "ps-thumb-marks"}, [
+            ...(panels && panels.length ? [panelMark(panels)] : []),
+            ...(fav ? [favoriteMark()] : []),
+        ])];
     }
 
     function makeThumb(p, cut, image, {on, selected, mark, label, onclick, select, panels}) {
@@ -1183,11 +1193,7 @@
                 select(e);
             }})] : []),
             ...(label ? [el("span", {class: "ps-thumb-label", text: label})] : []),
-            // はめ込んでいるコマ（削除するときは確認で知らせる）と、その隣にお気に入り
-            ...((panels && panels.length) || fav ? [el("span", {class: "ps-thumb-marks"}, [
-                ...(panels && panels.length ? [panelMark(panels)] : []),
-                ...(fav ? [favoriteMark()] : []),
-            ])] : []),
+            ...thumbMarks(panels, fav),
         ]);
         thumb.dataset.name = image.name;
         thumb.addEventListener("click", onclick);
@@ -2753,6 +2759,8 @@
             openImage: (image) => openViewerFor(cut, image),
             // 上段のサムネイルの ✕。サムネイル一覧の削除と同じ確認を出す
             deleteImage: (image) => askDeleteImages([selKey(cut, image.name)], "画像を削除"),
+            // 上段のサムネイルの左下の印（サムネイル一覧と同じ、コマとお気に入り）
+            marks: (image) => thumbMarks(panelPages(selKey(cut, image.name), project.books, true), isFavorite(cut, image.name)),
             onClose() {
                 closeQueueForm();
                 closeQueueManager();

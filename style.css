@@ -997,6 +997,12 @@ body.mtm-fs-open {
     font-size: 10px;
 }
 
+.ps-ed-thumb .ps-thumb-marks {
+    left: 3px;
+    bottom: 3px;
+    gap: 2px;
+}
+
 /* サムネイルの削除。マウスを乗せたときだけ出す */
 .ps-ed-thumb-del {
     position: absolute;
