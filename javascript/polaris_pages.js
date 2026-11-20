@@ -630,6 +630,10 @@
             });
         }
         svg.addEventListener("pointerdown", pointerDown);
+        // スタンプモードの右クリックはスタンプに使うので、メニューを出さない
+        svg.addEventListener("contextmenu", (e) => {
+            if (ed && prefs.tool === "sfx") e.preventDefault();
+        });
         svg.addEventListener("pointermove", pointerMove);
         svg.addEventListener("pointerup", pointerUp);
         svg.addEventListener("pointercancel", () => {
@@ -1502,6 +1506,7 @@
         if (!b) return;
         const s = {id: newId(), type: "sfx", name: "", x: round1(p.x - b.w / 2), y: round1(p.y - b.h / 2), w: round1(b.w), h: round1(b.h), params};
         change(() => page.shapes.push(s));
+        return s;
     }
 
     // 選んだオノマトペの設定を変える。final でなければ描き直すだけ（つまみを動かしている間）
@@ -1616,7 +1621,7 @@
         for (const st of sortedStamps()) {
             const item = el("div", {class: "ps-pg-sfx-stamp" + (active("stamp", st.id) ? " ps-on" : "")}, [
                 el("button", {
-                    type: "button", class: "ps-pg-sfx-stamp-pick", title: `「${st.params.text}」を置きます。クリックした所に続けて置けます`,
+                    type: "button", class: "ps-pg-sfx-stamp-pick", title: `「${st.params.text}」を置きます。ページを左クリックで 1 つ置いて選んだ状態に、右クリックなら続けて置けます`,
                     onclick: () => (active("stamp", st.id) ? setTool("select") : startStamp("stamp", st.id)),
                 }, [SFX().preview(st.params)]),
                 el("div", {class: "ps-pg-sfx-stamp-font", text: shortText(fontName(st.params.font), STAMP_FONT_CHARS), title: fontName(st.params.font)}),
@@ -2064,7 +2069,9 @@
         if (document.activeElement !== q(".ps-pg-w")) q(".ps-pg-w").value = ed.page.width;
         if (document.activeElement !== q(".ps-pg-h")) q(".ps-pg-h").value = ed.page.height;
         q(".ps-pg-hint").textContent = prefs.tool === "sfx" && stampSource
-            ? `スタンプ「${stampSource.params.text}」：クリックした所に置きます。続けて置けます${prefs.sfxVary ? "（置くたびに形が少し変わります）" : ""}。Esc か V で選択に戻ります。置いたオノマトペは「選択」で選ぶと細かく調整できます。`
+            ? (stampSource.kind === "stamp"
+                ? `調整済みスタンプ「${stampSource.params.text}」：左クリックで 1 つ置いて選んだ状態にします（そのまま調整できます）。右クリックなら置いたあとも続けて置けます${prefs.sfxVary ? "（置くたびに形が少し変わります）" : ""}。Esc か V で選択に戻ります。`
+                : `スタンプ「${stampSource.params.text}」：クリックした所に置きます。続けて置けます${prefs.sfxVary ? "（置くたびに形が少し変わります）" : ""}。Esc か V で選択に戻ります。置いたオノマトペは「選択」で選ぶと細かく調整できます。`)
             : vertexMode && s && s.type === "sfx"
                 ? "字を 1 つずつ直します：字を押して選び、ドラッグで移動（Shift で縦か横だけ）、上の丸で回転（Shift で 15° ずつ）、右下の四角で大きさ。外枠の角の色付きの四角で、枠全体の大きさを変えます。矢印キーで 1 px（Shift で 10 px）。E で終わります。"
                 : HINTS[prefs.tool] || "";
@@ -2240,15 +2247,24 @@
     }
 
     function pointerDown(e) {
-        if (!ed || e.button !== 0) return;
-        e.preventDefault();
-        const p = toPage(e);
-        // スタンプモード：クリックした所にオノマトペを置く（続けて置ける）
-        if (prefs.tool === "sfx") {
+        if (!ed) return;
+        // スタンプモード：クリックした所にオノマトペを置く。
+        // 調整済みスタンプは、左クリックで 1 つ置いて選んだ状態にし（すぐ調整できる）、右クリックなら置いたあともスタンプを続ける。
+        // 文字列のスタンプは、どちらのボタンでも続けて置ける
+        if (prefs.tool === "sfx" && (e.button === 0 || e.button === 2)) {
+            e.preventDefault();
             finishTextEdit(true);
-            placeStamp(inPage(p));
+            const once = e.button === 0 && stampSource && stampSource.kind === "stamp";
+            placeStamp(inPage(toPage(e))).then((s) => {
+                if (!once || !s || !ed || !shapeOf(s.id)) return;
+                setTool("select");
+                select(s.id);
+            });
             return;
         }
+        if (e.button !== 0) return;
+        e.preventDefault();
+        const p = toPage(e);
         // セリフの道具：置いたセリフを押したら文字を直す。ほかの所なら新しく置く
         if (prefs.tool === "text") {
             const hit = e.target.closest("[data-id]");
