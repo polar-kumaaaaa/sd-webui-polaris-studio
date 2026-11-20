@@ -3117,6 +3117,12 @@ body.mtm-fs-open {
     opacity: 0.4;
 }
 
+/* 字の手直し中に出す、枠全体の大きさのつまみ。字のつまみ（白）と見分けるよう塗る */
+.ps-pg-handle.ps-pg-handle-frame {
+    fill: var(--color-accent, #ff7c00);
+    stroke: #fff;
+}
+
 .ps-pg-glyph {
     fill: rgba(255, 124, 0, 0.04);
     stroke: var(--color-accent, #ff7c00);

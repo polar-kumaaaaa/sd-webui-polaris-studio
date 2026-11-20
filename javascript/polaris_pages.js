@@ -2066,7 +2066,7 @@
         q(".ps-pg-hint").textContent = prefs.tool === "sfx" && stampSource
             ? `スタンプ「${stampSource.params.text}」：クリックした所に置きます。続けて置けます${prefs.sfxVary ? "（置くたびに形が少し変わります）" : ""}。Esc か V で選択に戻ります。置いたオノマトペは「選択」で選ぶと細かく調整できます。`
             : vertexMode && s && s.type === "sfx"
-                ? "字を 1 つずつ直します：字を押して選び、ドラッグで移動（Shift で縦か横だけ）、上の丸で回転（Shift で 15° ずつ）、右下の四角で大きさ。矢印キーで 1 px（Shift で 10 px）。E で終わります。"
+                ? "字を 1 つずつ直します：字を押して選び、ドラッグで移動（Shift で縦か横だけ）、上の丸で回転（Shift で 15° ずつ）、右下の四角で大きさ。外枠の角の色付きの四角で、枠全体の大きさを変えます。矢印キーで 1 px（Shift で 10 px）。E で終わります。"
                 : HINTS[prefs.tool] || "";
         q(".ps-pg-sfx-toggle").classList.toggle("mtm-active", prefs.sfxOpen);
         q(".ps-pg-sfx").classList.toggle("ps-off", !prefs.sfxOpen || !SFX());
@@ -2150,6 +2150,12 @@
             g.appendChild(svgEl("rect", {x: b.x, y: b.y, width: b.w, height: b.h, class: "ps-pg-sel-outline"}));
         } else if (fr) {
             g.appendChild(svgEl("rect", {x: s.x, y: s.y, width: s.w, height: s.h, class: "ps-pg-sel-outline ps-pg-sel-faint"}));
+            // 字の手直しのまま、枠全体の大きさも変えられるよう、外枠の角のつまみも出す（字のつまみより奥に置く）
+            for (const [name, x, y] of [["nw", s.x, s.y], ["ne", s.x + s.w, s.y], ["se", s.x + s.w, s.y + s.h], ["sw", s.x, s.y + s.h]]) {
+                const h = handle(name, x, y);
+                h.classList.add("ps-pg-handle-frame");
+                g.appendChild(h);
+            }
             // 選んだ字を最後に描いて、つまみを手前にする
             const order = fr.glyphs.filter((f) => f.i !== activeGlyph).concat(fr.glyphs.filter((f) => f.i === activeGlyph));
             for (const f of order) {
