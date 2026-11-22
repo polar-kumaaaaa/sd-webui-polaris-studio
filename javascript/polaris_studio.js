@@ -369,11 +369,11 @@
                     </div>
                 </div>
                 <div class="ps-ed-prompts">
-                    <label class="ps-ed-label">ポジティブプロンプト <span class="ps-ed-note">生成に使う最終プロンプト。直接編集でき、ここでの編集は上のリストに影響しません</span>
-                        <textarea class="ps-ed-pos-text" rows="6" spellcheck="false"></textarea>
+                    <label class="ps-ed-label"><span>ポジティブプロンプト <span class="ps-ed-note">生成に使う最終プロンプト。直接編集でき、ここでの編集は上のリストに影響しません</span> <span class="ps-ed-stray ps-off"></span></span>
+                        <div class="ps-ed-hl-wrap"><div class="ps-ed-hl" aria-hidden="true"></div><textarea class="ps-ed-pos-text" rows="6" spellcheck="false"></textarea></div>
                     </label>
-                    <label class="ps-ed-label">ネガティブプロンプト <span class="ps-ed-note">ネガティブ専用カテゴリのタグはこちらに入ります</span>
-                        <textarea class="ps-ed-neg-text" rows="2" spellcheck="false"></textarea>
+                    <label class="ps-ed-label"><span>ネガティブプロンプト <span class="ps-ed-note">ネガティブ専用カテゴリのタグはこちらに入ります</span> <span class="ps-ed-stray ps-off"></span></span>
+                        <div class="ps-ed-hl-wrap"><div class="ps-ed-hl" aria-hidden="true"></div><textarea class="ps-ed-neg-text" rows="2" spellcheck="false"></textarea></div>
                     </label>
                 </div>
                 <div class="ps-ed-commands">
@@ -474,6 +474,11 @@
             if (e.target.matches(".ps-ed-pos-text, .ps-ed-neg-text")) renderPicks();
             updateDirty();
         });
+        // 赤い印の下地を、テキスト欄のスクロール・大きさの変化に合わせる
+        for (const area of [posArea(), negArea()]) {
+            area.addEventListener("scroll", () => syncPromptMarks(area));
+            new ResizeObserver(() => syncPromptMarks(area)).observe(area);
+        }
         fq(".mtm-fs-size-swap").addEventListener("click", () => {
             const w = fq(".mtm-fs-width");
             const h = fq(".mtm-fs-height");
@@ -940,6 +945,59 @@
         updateDirty();
     }
 
+    // ---------- 追加したタグにないタグの印 ----------
+    // テキスト欄の後ろに同じ文字を並べた下地（.ps-ed-hl）を置き、追加したタグのどれにも当たらないタグ（消したつもりで残ったもの・
+    // 手で書いたもの）に赤い背景を付ける。文字は下地では透明にして、テキスト欄の文字だけを見せる
+
+    function renderPromptMarks() {
+        for (const negative of [false, true]) {
+            const area = negative ? negArea() : posArea();
+            const hl = area.previousElementSibling;
+            const keys = new Set(pickedItems().filter((x) => isNegativeCategory(x.categoryId) === negative).flatMap((x) => keysOf(x.tags)));
+            const text = area.value;
+            const stray = parsePrompt(text).filter((t) => !keys.has(t.key));
+            const frag = document.createDocumentFragment();
+            let at = 0;
+            for (const t of stray) {
+                frag.appendChild(document.createTextNode(text.slice(at, t.start)));
+                frag.appendChild(el("mark", {text: text.slice(t.start, t.end)}));
+                at = t.end;
+            }
+            // 末尾の改行も高さに入るよう、1 文字足しておく
+            frag.appendChild(document.createTextNode(text.slice(at) + "​"));
+            hl.textContent = "";
+            hl.appendChild(frag);
+            const count = area.closest("label").querySelector(".ps-ed-stray");
+            count.textContent = `追加したタグにないもの ${stray.length} 個`;
+            count.title = stray.map((t) => t.text).join("\n");
+            count.classList.toggle("ps-off", !stray.length);
+            syncPromptMarks(area);
+        }
+    }
+
+    // 下地をテキスト欄と同じ大きさ・文字・余白・スクロール位置にそろえる
+    function syncPromptMarks(area) {
+        const hl = area.previousElementSibling;
+        const cs = getComputedStyle(area);
+        for (const p of ["fontFamily", "fontSize", "fontWeight", "lineHeight", "letterSpacing", "paddingTop", "paddingLeft", "paddingBottom",
+            "borderTopWidth", "borderLeftWidth", "borderBottomWidth", "borderRightWidth", "borderRadius", "tabSize"]) {
+            hl.style[p] = cs[p];
+        }
+        hl.style.width = area.offsetWidth + "px";
+        hl.style.height = area.offsetHeight + "px";
+        // テキスト欄にスクロールバーが出ていれば、その幅だけ右を空ける（中の幅をそろえて、折り返し位置を同じにする）
+        hl.style.paddingRight = cs.paddingRight;
+        const gap = hl.clientWidth - area.clientWidth;
+        if (gap) hl.style.paddingRight = parseFloat(cs.paddingRight) + gap + "px";
+        if (!area.dataset.bg) {
+            area.dataset.bg = "1";
+            hl.style.backgroundColor = cs.backgroundColor;
+            area.style.backgroundColor = "transparent";
+        }
+        hl.scrollTop = area.scrollTop;
+        hl.scrollLeft = area.scrollLeft;
+    }
+
     // 追加したタグが全部テキストに入っているか
     function inText(item) {
         const present = new Set(parsePrompt(areaOf(item).value).map((t) => t.key));
@@ -1096,6 +1154,7 @@
 
     // 右：追加したタグ
     function renderPicks() {
+        renderPromptMarks();
         const box = fq(".ps-ed-picks");
         const top = box.scrollTop;
         box.textContent = "";
