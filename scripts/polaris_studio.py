@@ -414,6 +414,9 @@ def _sanitize_page(raw, cut_ids):
                 "snake": int(_ranged(s.get("snake"), *HLINE_SNAKE, 0)),
                 "snakeFrom": int(_ranged(s.get("snakeFrom"), *HLINE_SNAKE_FROM, 80)),
                 "snakeWaves": int(_ranged(s.get("snakeWaves"), *HLINE_SNAKE_WAVES, 3)),
+                # 始点・終点を細くするか（入り・抜き）
+                "taperIn": s.get("taperIn") is not False,
+                "taperOut": s.get("taperOut") is not False,
                 "name": name if re.fullmatch(MATERIAL_NAME, name) else "",
                 **({"key": str(s.get("key"))[:64]} if s.get("key") else {}),
             })

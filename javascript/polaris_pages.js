@@ -309,7 +309,8 @@
     // 書き出しにはオノマトペと同じく、ブラウザで描いた画像（name）を使う。x, y, w, h はその画像を置く枠（描くたびに合わせる）
     // 蛇行（snake）：線の終わりのほうを蛇のようにくねらせる。snakeFrom（線の何 % から）でくねりが始まり、終点に向けて大きくなる。
     // snakeWaves はくねりの波の数、snake はその大きさ（0 でくねらない）
-    const HLINE_DEFAULT = {width: 12, wobble: 30, color: "#000000", outline: 0, outlineColor: "#ffffff", snake: 0, snakeFrom: 80, snakeWaves: 3};
+    // taperIn / taperOut：始点・終点を筆の入り・抜きのように細くするか
+    const HLINE_DEFAULT = {width: 12, wobble: 30, color: "#000000", outline: 0, outlineColor: "#ffffff", snake: 0, snakeFrom: 80, snakeWaves: 3, taperIn: true, taperOut: true};
     const HLINE_WIDTH = [2, 200];
     const HLINE_WOBBLE = [0, 100];
     const HLINE_OUTLINES = [0, 2, 4, 6, 8, 12, 16];
@@ -367,7 +368,9 @@
                 off += snakeDir * snakeAmp * grow * Math.sin(2 * Math.PI * waves * u);
             }
             centers.push([s.x1 + dx * t - uy * off, s.y1 + dy * t + ux * off]);
-            const taper = Math.pow(Math.min(1, t / 0.12), 0.6) * Math.pow(Math.min(1, (1 - t) / 0.22), 0.6);
+            // 入り（始点）と抜き（終点）を細くする。taperIn / taperOut が false の端は太さのまま
+            const taper = (s.taperIn === false ? 1 : Math.pow(Math.min(1, t / 0.12), 0.6))
+                * (s.taperOut === false ? 1 : Math.pow(Math.min(1, (1 - t) / 0.22), 0.6));
             widths.push(s.width * Math.max(0.06, taper) * (1 + 0.18 * at(thick, t)));
         }
         const left = [], right = [];
@@ -406,6 +409,7 @@
     function hlineKey(s) {
         const keys = [s.x1, s.y1, s.x2, s.y2, s.width, s.wobble, s.color, s.outline, s.outlineColor, s.seed];
         if (s.snake) keys.push(s.snake, s.snakeFrom, s.snakeWaves);    // 蛇行なしの線はキーを変えない（作り直さない）
+        if (s.taperIn === false || s.taperOut === false) keys.push("taper", s.taperIn !== false, s.taperOut !== false);
         const text = HLINE_VERSION + JSON.stringify(keys);
         let h = 0x811c9dc5;
         for (let i = 0; i < text.length; i++) h = Math.imul(h ^ text.charCodeAt(i), 0x01000193);
@@ -424,6 +428,8 @@
             snake: num(o.snake, HLINE_SNAKE, HLINE_DEFAULT.snake),
             snakeFrom: num(o.snakeFrom, HLINE_SNAKE_FROM, HLINE_DEFAULT.snakeFrom),
             snakeWaves: num(o.snakeWaves, HLINE_SNAKE_WAVES, HLINE_DEFAULT.snakeWaves),
+            taperIn: o.taperIn !== false,
+            taperOut: o.taperOut !== false,
         };
     }
 
@@ -735,6 +741,11 @@
                     <select class="ps-pg-houtline" title="線のフチの太さ（ピクセル）">${HLINE_OUTLINES.map((w) => `<option value="${w}">${w ? w + " px" : "なし"}</option>`).join("")}</select>
                     <input type="color" class="ps-pg-houtcolor" title="フチの色">
                 </label>
+                <span class="ps-pg-htaper" title="線の端を、筆の入り・抜きのように細くするか">
+                    <span>細く</span>
+                    <label><input type="checkbox" class="ps-pg-htaper-in"> 始め</label>
+                    <label><input type="checkbox" class="ps-pg-htaper-out"> 終わり</label>
+                </span>
                 <span class="ps-pg-hsnake" title="線の終わりのほうを蛇のようにくねらせます。始まりの位置から終点に向けて、だんだん大きくなります">
                     <label class="ps-pg-size">蛇行 <input type="range" class="ps-pg-hsnake-amp" min="${HLINE_SNAKE[0]}" max="${HLINE_SNAKE[1]}" step="1" title="くねりの大きさ（0 でくねらない）"></label>
                     <label class="ps-pg-size">ここから <input type="range" class="ps-pg-hsnake-from" min="${HLINE_SNAKE_FROM[0]}" max="${HLINE_SNAKE_FROM[1]}" step="1" title="線のどこからくねらせるか（始点 0 %〜終点の近く 95 %）"><span class="ps-pg-hsnake-from-val"></span></label>
@@ -1272,6 +1283,8 @@
         q(".ps-pg-hcolor").addEventListener("change", (e) => setHlineStyle("color", e.target.value.toLowerCase()));
         q(".ps-pg-houtline").addEventListener("change", (e) => setHlineStyle("outline", Number(e.target.value)));
         q(".ps-pg-houtcolor").addEventListener("change", (e) => setHlineStyle("outlineColor", e.target.value.toLowerCase()));
+        q(".ps-pg-htaper-in").addEventListener("change", (e) => setHlineStyle("taperIn", e.target.checked));
+        q(".ps-pg-htaper-out").addEventListener("change", (e) => setHlineStyle("taperOut", e.target.checked));
         q(".ps-pg-hreroll").addEventListener("click", () => rerollHline());
         q(".ps-pg-balloon-toggle").addEventListener("click", () => toggleBalloon());
         q(".ps-pg-balloon-stroke").addEventListener("change", (e) => {
@@ -1316,6 +1329,8 @@
         set(".ps-pg-hsnake-from", t.snakeFrom);
         set(".ps-pg-hsnake-waves", t.snakeWaves);
         q(".ps-pg-hsnake-from-val").textContent = t.snakeFrom + " %";
+        q(".ps-pg-htaper-in").checked = t.taperIn !== false;
+        q(".ps-pg-htaper-out").checked = t.taperOut !== false;
         // くねらせないときは、始まりと波を薄くする
         q(".ps-pg-hsnake").classList.toggle("ps-pg-hsnake-off", !t.snake);
         q(".ps-pg-hreroll").disabled = !placed;

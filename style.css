@@ -2589,6 +2589,22 @@ body.mtm-fs-open {
     padding: 3px 6px;
 }
 
+/* 手描き線の端（細くするか） */
+.ps-pg-htaper {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    color: var(--body-text-color-subdued);
+}
+
+.ps-pg-htaper label {
+    display: flex;
+    align-items: center;
+    gap: 3px;
+    cursor: pointer;
+}
+
 /* 手描き線の蛇行 */
 .ps-pg-hsnake {
     display: flex;
