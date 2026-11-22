@@ -23,6 +23,7 @@
     const HINTS = {
         select: "クリックで選択、ドラッグで移動・サイズ変更。選んだ四角をもう一度クリック（またはダブルクリック）すると画像を選べます。Delete で削除、Ctrl+Z で元に戻す。Alt を押している間は吸着しません。重なったコマは「下を隠す」(H) で手前のコマだけの線にし、「前面へ」(])「背面へ」([) で手前にするコマを決めます。素材は角のつまみで縦横比を保って拡大・縮小（Shift で自由に）、辺のつまみで伸び縮みします。「頂点を編集」(E) では、コマの角の丸いつまみをドラッグして台形・平行四辺形などにします（Shift で水平・垂直だけ、矢印キーで 1 px ずつ）。オノマトペは、選んでダブルクリックで「字を 1 つずつ直す」の入り・切り、Ctrl を押しながらドラッグで複製します。",
         line: "ドラッグで直線を引きます。Shift で水平・垂直。直線は分割線で、画像ははめ込めません。",
+        hline: "ドラッグで、手で引いたように揺れる線を引きます。Shift で水平・垂直。太さ・揺れ・色・フチは下の行で、🎲 で別の揺れ方にします。引いた線は「選択」で両端を動かせます。",
         rect: "ドラッグで四角を描きます。Shift で正方形。線「なし」にすると透明な四角（線のないコマ）になります。台形や平行四辺形は、四角を選んで「頂点を編集」(E) で角を動かして作ります。",
         tri: "ドラッグで三角を描きます（ドラッグした枠の上の辺の真ん中が頂点。上へドラッグすると逆向き）。Shift で幅と高さをそろえます。描いたあとは「頂点を編集」(E) で角を動かせます。",
         text: "クリックした所にセリフを置き、文字を入力します（Ctrl+Enter で決定、Esc で取り消し）。置いたセリフをクリックすると文字を直せます。フォント・大きさ・縦書き/横書きなどは下の行で。動かすのは「選択」で。",
@@ -302,6 +303,145 @@
         }));
     }
 
+    // ---------- 手描き線 ----------
+    // 始点（x1, y1）から終点（x2, y2）まで、手で引いたように揺れる線。形は太さ・揺れ・乱数の種（seed）で決まる。
+    // 線の向きに細かく点を並べ、線と直角の向きにゆっくりした揺れと細かい揺れを足してつなぐ。両端は細くする（筆の入りと抜き）。
+    // 書き出しにはオノマトペと同じく、ブラウザで描いた画像（name）を使う。x, y, w, h はその画像を置く枠（描くたびに合わせる）
+    const HLINE_DEFAULT = {width: 12, wobble: 30, color: "#000000", outline: 0, outlineColor: "#ffffff"};
+    const HLINE_WIDTH = [2, 200];
+    const HLINE_WOBBLE = [0, 100];
+    const HLINE_OUTLINES = [0, 2, 4, 6, 8, 12, 16];
+    const HLINE_VERSION = 1;    // 描き方を変えたら上げる（書き出し用の画像を作り直す）
+
+    function seededRng(seed) {
+        let a = (seed >>> 0) || 1;
+        return () => {
+            a = (a + 0x6D2B79F5) | 0;
+            let t = Math.imul(a ^ (a >>> 15), 1 | a);
+            t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+            return ((t ^ (t >>> 14)) >>> 0) / 4294967296 * 2 - 1;
+        };
+    }
+
+    // 線の輪郭（多角形の頂点、ページのピクセル）
+    function hlineOutline(s) {
+        const dx = s.x2 - s.x1, dy = s.y2 - s.y1;
+        const len = Math.max(Math.hypot(dx, dy), 1);
+        const ux = dx / len, uy = dy / len;
+        const n = clamp(Math.round(len / 10), 16, 400);
+        const rnd = seededRng(s.seed);
+        const amp = (s.width * 0.8 + 6) * s.wobble / 50;
+        // ゆっくりした揺れ：およそ 120 px ごとの点をなめらかにつなぐ
+        const k = Math.max(2, Math.round(len / 120));
+        const slow = Array.from({length: k + 1}, () => rnd());
+        // 細かい揺れと太さのむら：点ごとの乱数を隣とならす
+        const smooth = (arr) => arr.map((v, i) => (arr[Math.max(0, i - 1)] + v * 2 + arr[Math.min(arr.length - 1, i + 1)]) / 4);
+        const fine = smooth(smooth(Array.from({length: n + 1}, () => rnd())));
+        const thick = smooth(smooth(Array.from({length: n + 1}, () => rnd())));
+        const centers = [], widths = [];
+        for (let i = 0; i <= n; i++) {
+            const t = i / n;
+            const f = t * k, j = Math.min(Math.floor(f), k - 1), e = (1 - Math.cos(Math.PI * (f - j))) / 2;
+            const off = amp * (0.75 * (slow[j] * (1 - e) + slow[j + 1] * e) + 0.35 * fine[i]);
+            centers.push([s.x1 + dx * t - uy * off, s.y1 + dy * t + ux * off]);
+            const taper = Math.pow(Math.min(1, t / 0.12), 0.6) * Math.pow(Math.min(1, (1 - t) / 0.22), 0.6);
+            widths.push(s.width * Math.max(0.06, taper) * (1 + 0.18 * thick[i]));
+        }
+        const left = [], right = [];
+        for (let i = 0; i <= n; i++) {
+            const a = centers[Math.max(0, i - 1)], b = centers[Math.min(n, i + 1)];
+            const tl = Math.max(Math.hypot(b[0] - a[0], b[1] - a[1]), 1e-6);
+            const nx = -(b[1] - a[1]) / tl, ny = (b[0] - a[0]) / tl;
+            const h = widths[i] / 2;
+            left.push([centers[i][0] + nx * h, centers[i][1] + ny * h]);
+            right.push([centers[i][0] - nx * h, centers[i][1] - ny * h]);
+        }
+        return left.concat(right.reverse());
+    }
+
+    const fmt1 = (pts) => pts.map((p) => round1(p[0]) + "," + round1(p[1])).join(" ");
+
+    // 線の SVG（フチがあれば、フチを先に太く描く）
+    function hlineNodes(s) {
+        const pts = fmt1(hlineOutline(s));
+        const nodes = [];
+        if (s.outline) {
+            nodes.push(svgEl("polygon", {points: pts, fill: s.outlineColor, stroke: s.outlineColor, "stroke-width": s.outline * 2, "stroke-linejoin": "round"}));
+        }
+        nodes.push(svgEl("polygon", {points: pts, fill: s.color, stroke: s.color, "stroke-width": 0.6, "stroke-linejoin": "round"}));
+        return nodes;
+    }
+
+    // 書き出し用の画像を置く枠（線の輪郭にフチと少しの余白を足した四角）
+    function hlineBox(s) {
+        const bb = boundsOf(hlineOutline(s));
+        const m = (s.outline || 0) + 2;
+        return {x: round1(bb.l - m), y: round1(bb.t - m), w: round1(bb.r - bb.l + m * 2), h: round1(bb.b - bb.t + m * 2)};
+    }
+
+    // 書き出し用の画像が今の形に合っているかを見るためのキー
+    function hlineKey(s) {
+        const text = HLINE_VERSION + JSON.stringify([s.x1, s.y1, s.x2, s.y2, s.width, s.wobble, s.color, s.outline, s.outlineColor, s.seed]);
+        let h = 0x811c9dc5;
+        for (let i = 0; i < text.length; i++) h = Math.imul(h ^ text.charCodeAt(i), 0x01000193);
+        return (h >>> 0).toString(36) + text.length.toString(36);
+    }
+
+    // 手描き線の書式を範囲に収める（isColor はセリフの書式と共通）
+    function cleanHlineStyle(o) {
+        const num = (v, [lo, hi], d) => (typeof v === "number" && isFinite(v) ? clamp(Math.round(v), lo, hi) : d);
+        return {
+            width: num(o.width, HLINE_WIDTH, HLINE_DEFAULT.width),
+            wobble: num(o.wobble, HLINE_WOBBLE, HLINE_DEFAULT.wobble),
+            color: isColor(o.color) ? o.color.toLowerCase() : HLINE_DEFAULT.color,
+            outline: HLINE_OUTLINES.includes(o.outline) ? o.outline : HLINE_DEFAULT.outline,
+            outlineColor: isColor(o.outlineColor) ? o.outlineColor.toLowerCase() : HLINE_DEFAULT.outlineColor,
+        };
+    }
+
+    const hlineStale = (s) => s.type === "hline" && (!s.name || s.key !== hlineKey(s));
+
+    // 置いた大きさの 2 倍の PNG（Blob）にする。枠も一緒に返す
+    async function rasterizeHline(s) {
+        const box = hlineBox(s);
+        const scale = Math.min(2, 8192 / box.w, 8192 / box.h);
+        const w = Math.max(1, Math.round(box.w * scale)), h = Math.max(1, Math.round(box.h * scale));
+        const g = svgEl("g", {transform: `translate(${-box.x} ${-box.y})`}, hlineNodes(s));
+        const src = `<svg xmlns="${NS}" width="${w}" height="${h}" viewBox="0 0 ${box.w} ${box.h}">${g.outerHTML}</svg>`;
+        const url = URL.createObjectURL(new Blob([src], {type: "image/svg+xml"}));
+        try {
+            const img = new Image();
+            img.src = url;
+            await img.decode();
+            const canvas = document.createElement("canvas");
+            canvas.width = w;
+            canvas.height = h;
+            canvas.getContext("2d").drawImage(img, 0, 0, w, h);
+            const blob = await new Promise((ok, ng) => canvas.toBlob((b) => (b ? ok(b) : ng(new Error("PNG にできません"))), "image/png"));
+            return {blob, box};
+        } finally {
+            URL.revokeObjectURL(url);
+        }
+    }
+
+    // ページの手描き線のうち、書き出し用の画像が古いものを作り直す。変えたら true
+    async function bakeHlines(pages, upload) {
+        let changed = false;
+        for (const page of pages) {
+            for (const s of page.shapes || []) {
+                if (!hlineStale(s)) continue;
+                const key = hlineKey(s);
+                const {blob, box} = await rasterizeHline(s);
+                const saved = await upload(blob);
+                // 作っている間に形が変わっていたら、次の機会に作り直す
+                if (hlineKey(s) !== key) continue;
+                Object.assign(s, box, {name: saved.name, key});
+                changed = true;
+            }
+        }
+        return changed;
+    }
+
     // 頂点が 4 つで、辺が水平・垂直の四角か
     const isAxisRect = (pts) => pts.length === 4 && pts.every((p, i) => {
         const n = pts[(i + 1) % 4];
@@ -383,11 +523,15 @@
         // 3. 素材（吹き出し・集中線・小物など）は、コマと線の上の層に並び順に重ねる。ページからはみ出した所は切る
         // 4. セリフはいちばん上に、並び順に
         // オノマトペは素材と同じ層に、並び順に描く。字形がまだ届いていなければ、書き出し用の画像で代える
-        const materials = page.shapes.filter((s) => s.type === "material" || s.type === "sfx");
+        const materials = page.shapes.filter((s) => s.type === "material" || s.type === "sfx" || s.type === "hline");
         const texts = page.shapes.filter((s) => s.type === "text");
         if (materials.length || texts.length) {
             const layer = svgEl("svg", {x: 0, y: 0, width: page.width, height: page.height, viewBox: `0 0 ${page.width} ${page.height}`, overflow: "hidden"});
             for (const s of materials) {
+                if (s.type === "hline") {
+                    for (const node of hlineNodes(s)) layer.appendChild(node);
+                    continue;
+                }
                 if (s.balloon) drawBalloon(layer, s);
                 const vector = s.type === "sfx" && window.PolarisSfx ? window.PolarisSfx.node(s) : null;
                 if (vector) {
@@ -433,7 +577,9 @@
         // オノマトペの調整で、フォント別の見本の枠を開いているか
         sfxFontsOpen: false,
         // フォント別の見本の枠をピンで固定しているか（オノマトペを選んでいないときも出しておく）
-        sfxFontsPinned: false};
+        sfxFontsPinned: false,
+        // これから引く手描き線の書式（最後に使った書式）
+        hline: {...HLINE_DEFAULT}};
     const PAGE_COUNTS = [1, 2, 3];
 
     const q = (sel) => view.querySelector(sel);
@@ -449,7 +595,8 @@
     function loadPrefs() {
         try {
             const saved = JSON.parse(localStorage.getItem(PREFS_KEY) || "{}");
-            if (["select", "line", "rect", "tri", "text"].includes(saved.tool)) prefs.tool = saved.tool;
+            if (["select", "line", "hline", "rect", "tri", "text"].includes(saved.tool)) prefs.tool = saved.tool;
+            if (saved.hline && typeof saved.hline === "object") prefs.hline = cleanHlineStyle(saved.hline);
             if (saved.text && typeof saved.text === "object") prefs.text = cleanTextStyle(saved.text);
             const ids = (v, max) => (Array.isArray(v) ? [...new Set(v.filter((x) => typeof x === "string" && x))].slice(0, max) : []);
             prefs.fontFavorites = ids(saved.fontFavorites, FONT_FAV_MAX);
@@ -500,6 +647,7 @@
                 <div class="ps-pg-group">
                     <button type="button" class="mtm-btn" data-tool="select" title="選択・移動 (V)">選択</button>
                     <button type="button" class="mtm-btn" data-tool="line" title="直線 (L)">直線</button>
+                    <button type="button" class="mtm-btn" data-tool="hline" title="手描き線 (W)。ドラッグで、手で引いたように揺れる線を引きます">手描き線</button>
                     <button type="button" class="mtm-btn" data-tool="rect" title="四角 (R)">四角</button>
                     <button type="button" class="mtm-btn" data-tool="tri" title="三角 (Y)">三角</button>
                     <button type="button" class="mtm-btn" data-tool="text" title="セリフ (T)。クリックした所に文字を置きます">セリフ</button>
@@ -549,6 +697,17 @@
                     <button type="button" class="mtm-btn ps-pg-balloon-toggle" title="選んだセリフに四角い吹き出しを付ける・外す (B)。吹き出しの大きさは、菱形のつまみで文字とは別に変えられます">□ 吹き出し</button>
                     <select class="ps-pg-balloon-stroke" title="吹き出しの線の太さ">${BALLOON_STROKES.map((w) => `<option value="${w}">線 ${w} px</option>`).join("")}</select>
                 </span>
+            </div>
+            <div class="ps-pg-tools ps-pg-hlinebar ps-off" title="選んだ手描き線（なければ、これから引く線）の書式">
+                <span class="ps-pg-label">手描き線</span>
+                <label class="ps-pg-size">太さ <input type="number" class="ps-pg-hwidth" min="${HLINE_WIDTH[0]}" max="${HLINE_WIDTH[1]}" step="1" title="線のいちばん太い所の太さ（ページのピクセル）"></label>
+                <label class="ps-pg-size">揺れ <input type="range" class="ps-pg-hwobble" min="${HLINE_WOBBLE[0]}" max="${HLINE_WOBBLE[1]}" step="1" title="手振れの大きさ（0 でまっすぐ）"></label>
+                <label class="ps-pg-size">色 <input type="color" class="ps-pg-hcolor" title="線の色"></label>
+                <label class="ps-pg-size">フチ
+                    <select class="ps-pg-houtline" title="線のフチの太さ（ピクセル）">${HLINE_OUTLINES.map((w) => `<option value="${w}">${w ? w + " px" : "なし"}</option>`).join("")}</select>
+                    <input type="color" class="ps-pg-houtcolor" title="フチの色">
+                </label>
+                <button type="button" class="mtm-btn ps-pg-hreroll" title="同じ設定のまま、別の揺れ方にします (G)">🎲 別の揺れ</button>
             </div>
             <div class="ps-pg-fontpicker ps-off">
                 <div class="ps-pg-fontpicker-head">
@@ -1056,6 +1215,24 @@
         q(".ps-pg-tcolor").addEventListener("change", (e) => setTextStyle("color", e.target.value.toLowerCase()));
         q(".ps-pg-toutcolor").addEventListener("change", (e) => setTextStyle("outlineColor", e.target.value.toLowerCase()));
         view.querySelectorAll("[data-dir]").forEach((b) => b.addEventListener("click", () => setTextStyle("vertical", b.dataset.dir === "v")));
+        // 手描き線の書式
+        const hnum = (sel, key, range) => q(sel).addEventListener("change", (e) => {
+            const v = Number(e.target.value);
+            if (e.target.value === "" || !Number.isFinite(v)) {
+                updateTools();
+                return;
+            }
+            setHlineStyle(key, clamp(Math.round(v), ...range));
+        });
+        hnum(".ps-pg-hwidth", "width", HLINE_WIDTH);
+        hnum(".ps-pg-hwobble", "wobble", HLINE_WOBBLE);
+        q(".ps-pg-hwidth").addEventListener("keydown", (e) => {
+            if (e.key === "Enter" && !e.isComposing) e.target.blur();
+        });
+        q(".ps-pg-hcolor").addEventListener("change", (e) => setHlineStyle("color", e.target.value.toLowerCase()));
+        q(".ps-pg-houtline").addEventListener("change", (e) => setHlineStyle("outline", Number(e.target.value)));
+        q(".ps-pg-houtcolor").addEventListener("change", (e) => setHlineStyle("outlineColor", e.target.value.toLowerCase()));
+        q(".ps-pg-hreroll").addEventListener("click", () => rerollHline());
         q(".ps-pg-balloon-toggle").addEventListener("click", () => toggleBalloon());
         q(".ps-pg-balloon-stroke").addEventListener("change", (e) => {
             setBalloonStroke(Number(e.target.value));
@@ -1067,6 +1244,35 @@
                 if (e.key === "Enter" && !e.isComposing) e.target.blur();
             });
         }
+    }
+
+    // 手描き線の書式を変える。選んだ線があればそれに、なければこれから引く線に効く（どちらでも次に引く線の書式として覚える）
+    function setHlineStyle(key, value) {
+        prefs.hline = cleanHlineStyle({...prefs.hline, [key]: value});
+        savePrefs();
+        const s = selected();
+        if (s && s.type === "hline") change(() => Object.assign(s, cleanHlineStyle({...s, [key]: value})));
+        else updateTools();
+        refocus();
+    }
+
+    function rerollHline() {
+        const s = selected();
+        if (!s || s.type !== "hline" || !SFX()) return;
+        change(() => (s.seed = SFX().randomSeed()));
+    }
+
+    function fillHlineBar(t, placed) {
+        const set = (sel, v) => {
+            const input = q(sel);
+            if (document.activeElement !== input) input.value = v;
+        };
+        set(".ps-pg-hwidth", t.width);
+        set(".ps-pg-hwobble", t.wobble);
+        set(".ps-pg-hcolor", t.color);
+        set(".ps-pg-houtline", String(t.outline));
+        set(".ps-pg-houtcolor", t.outlineColor);
+        q(".ps-pg-hreroll").disabled = !placed;
     }
 
     // 書式を変える。選んだセリフがあればそれに、なければこれから置くセリフに効く（どちらでも次に置くセリフの書式として覚える）
@@ -1460,6 +1666,8 @@
                         onclick: () => toggleBalloonEdit()}),
                     el("button", {type: "button", class: "mtm-btn ps-pg-sfx-balloon-square", text: "四角に戻す", title: "フキダシを今の外枠の四角に戻します",
                         onclick: () => squarifyBalloon()}),
+                    el("button", {type: "button", class: "mtm-btn ps-pg-sfx-balloon-dice", text: "🎲", title: "フキダシの形をランダムに作り直します（ギザギザか、ゆがんだ多角形。外枠の大きさはそのまま）",
+                        onclick: () => randomBalloon()}),
                 ]),
                 el("div", {class: "ps-pg-sfx-row ps-pg-sfx-balloon-more"}, [
                     el("span", {class: "ps-pg-sfx-balloon-info"}),
@@ -1856,7 +2064,8 @@
         const bedit = q(".ps-pg-sfx-balloon-edit");
         bedit.disabled = !hasBalloon;
         bedit.classList.toggle("mtm-active", hasBalloon && balloonEdit);
-        q(".ps-pg-sfx-balloon-square").disabled = !hasBalloon || s.balloon.pts.length === 4 && isAxisRect(s.balloon.pts);
+        q(".ps-pg-sfx-balloon-dice").disabled = !hasBalloon;
+        q(".ps-pg-sfx-balloon-square").disabled =!hasBalloon || s.balloon.pts.length === 4 && isAxisRect(s.balloon.pts);
         q(".ps-pg-sfx-balloon-more").classList.toggle("ps-off", !hasBalloon);
         if (hasBalloon) {
             const stroke = q(".ps-pg-sfx-balloon-stroke");
@@ -1932,7 +2141,9 @@
         }
         baking = true;
         try {
-            if (await SFX().bake(pages, (blob) => opts.uploadMaterial(blob))) opts.onChange();
+            const sfx = await SFX().bake(pages, (blob) => opts.uploadMaterial(blob));
+            const lines = await bakeHlines(pages, (blob) => opts.uploadMaterial(blob));
+            if (sfx || lines) opts.onChange();
         } catch (err) {
             console.warn("[Polaris Studio] sfx bake failed", err);
         }
@@ -2086,7 +2297,7 @@
         render();
         loadFonts();
         // 書き出し用の画像が古いオノマトペがあれば作り直す
-        if (SFX() && pageList().some((pg) => (pg.shapes || []).some(SFX().stale))) scheduleBake();
+        if (SFX() && pageList().some((pg) => (pg.shapes || []).some((s) => SFX().stale(s) || hlineStale(s)))) scheduleBake();
     }
 
     function close() {
@@ -2172,12 +2383,14 @@
 
     // 選択の道具で図形を選んでいれば、その線を変える。描く道具では、これから描く図形の線を決める
     // いま線の太さを決める図形の種類（選んだ図形、なければ道具で描く図形）
-    const strokeType = (s) => (s ? s.type : ["line", "text", "sfx"].includes(prefs.tool) ? prefs.tool : "rect");
+    const strokeType = (s) => (s ? s.type : ["line", "hline", "text", "sfx"].includes(prefs.tool) ? prefs.tool : "rect");
+    // 線の太さのボタンを使わない図形（素材・セリフ・オノマトペ・手描き線。手描き線は下の行で太さを決める）
+    const noStroke = (type) => floating({type}) || type === "hline";
 
     function setStroke(w) {
         const s = selected();
         const type = strokeType(s);
-        if ((type === "line" && !w) || floating({type})) return;
+        if ((type === "line" && !w) || noStroke(type)) return;
         prefs[type] = w;
         savePrefs();
         if (s) change(() => (s.stroke = w));
@@ -2239,6 +2452,29 @@
         const bb = boundsOf(balloonPts(s));
         activeBalloonVertex = -1;
         change(() => setBalloonPts(s, [[bb.l, bb.t], [bb.r, bb.t], [bb.r, bb.b], [bb.l, bb.b]]));
+    }
+
+    // フキダシの形をランダムに作り直す（今の外枠の大きさのまま）。ギザギザ（外と内の点を交互に）か、ゆがんだ多角形
+    function randomBalloon() {
+        const s = selected();
+        if (!s || !s.balloon) return;
+        const bb = boundsOf(balloonPts(s));
+        const rand = (lo, hi) => lo + Math.random() * (hi - lo);
+        const spiky = Math.random() < 0.5;
+        const n = spiky ? 2 * Math.round(rand(6, 10)) : Math.round(rand(8, 14));
+        const step = Math.PI * 2 / n;
+        const start = rand(0, step);
+        const inner = rand(0.66, 0.82);
+        const raw = Array.from({length: n}, (_, i) => {
+            const a = start + i * step + rand(-0.25, 0.25) * step;
+            const r = spiky ? (i % 2 ? inner * rand(0.9, 1.1) : rand(0.92, 1)) : rand(0.84, 1);
+            return [Math.cos(a) * r, Math.sin(a) * r];
+        });
+        // 作った形を今の外枠いっぱいに広げる
+        const rb = boundsOf(raw);
+        const sx = (bb.r - bb.l) / Math.max(rb.r - rb.l, 1e-6), sy = (bb.b - bb.t) / Math.max(rb.b - rb.t, 1e-6);
+        activeBalloonVertex = -1;
+        change(() => setBalloonPts(s, raw.map((p) => [bb.l + (p[0] - rb.l) * sx, bb.t + (p[1] - rb.t) * sy])));
     }
 
     function deleteBalloonVertex(i) {
@@ -2326,9 +2562,14 @@
         view.querySelectorAll("[data-stroke]").forEach((b) => {
             const w = Number(b.dataset.stroke);
             // 素材とセリフには線がない
-            b.classList.toggle("mtm-active", !floating({type}) && w === current);
-            b.disabled = (type === "line" && !w) || floating({type});
+            b.classList.toggle("mtm-active", !noStroke(type) && w === current);
+            b.disabled = (type === "line" && !w) || noStroke(type);
         });
+        // 手描き線の書式の行
+        const hlineShape = s && s.type === "hline" ? s : null;
+        const hlineBar = prefs.tool === "hline" || !!hlineShape;
+        q(".ps-pg-hlinebar").classList.toggle("ps-off", !hlineBar);
+        if (hlineBar) fillHlineBar(hlineShape || prefs.hline, !!hlineShape);
         const textShape = s && s.type === "text" ? s : null;
         const textBar = prefs.tool === "text" || !!textShape;
         q(".ps-pg-textbar").classList.toggle("ps-off", !textBar);
@@ -2438,6 +2679,11 @@
         // フキダシは持ち主のすぐ下で受ける（押すと持ち主を選ぶ）
         const balloonHit = (s) => s.balloon && hits.appendChild(svgEl("polygon", {points: pointsAttr(balloonPts(s)), "data-id": s.id}));
         for (const s of page.shapes) {
+            // 手描き線は輪郭で受ける。細い線も掴めるよう、周りに太めの縁を足す
+            if (s.type === "hline") {
+                hits.appendChild(svgEl("polygon", {points: fmt1(hlineOutline(s)), stroke: "transparent", "stroke-width": 14 * u, "stroke-linejoin": "round", "data-id": s.id}));
+                continue;
+            }
             if (s.type !== "material" && s.type !== "sfx") continue;
             balloonHit(s);
             hits.appendChild(svgEl("rect", {x: s.x, y: s.y, width: s.w, height: s.h, "data-id": s.id}));
@@ -2476,6 +2722,15 @@
                     cx: p[0], cy: p[1], r: HANDLE * 0.65 * u, "data-handle": "bv" + i,
                     class: "ps-pg-vertex ps-pg-balloon-vertex" + (i === activeBalloonVertex ? " ps-on" : ""),
                 })));
+                // 外枠の右上の外に、形をランダムに作り直すサイコロ
+                const bb = boundsOf(pts);
+                const r = 13 * u;
+                const dx = bb.r + r + 6 * u, dy = bb.t - r - 6 * u;
+                g.appendChild(svgEl("g", {class: "ps-pg-balloon-dice", "data-handle": "bdice"}, [
+                    svgEl("title", {text: "フキダシの形をランダムに作り直します（外枠の大きさはそのまま）"}),
+                    svgEl("circle", {cx: dx, cy: dy, r}),
+                    svgEl("text", {x: dx, y: dy, "font-size": r * 1.2, "text-anchor": "middle", "dominant-baseline": "central", text: "🎲"}),
+                ]));
             } else {
                 const bb = boundsOf(pts);
                 const xs = {w: bb.l, c: (bb.l + bb.r) / 2, e: bb.r};
@@ -2622,8 +2877,8 @@
             kind: "", id: "", start: p, client: {x: e.clientX, y: e.clientY}, moved: false,
             before: snapshot(), unit: unit(), noSnap: e.altKey, targets: null,
         };
-        if (prefs.tool === "line" || prefs.tool === "rect" || prefs.tool === "tri") {
-            drag.kind = prefs.tool === "line" ? "newline" : "newrect";
+        if (prefs.tool === "line" || prefs.tool === "hline" || prefs.tool === "rect" || prefs.tool === "tri") {
+            drag.kind = prefs.tool === "line" || prefs.tool === "hline" ? "newline" : "newrect";
             drag.targets = snapTargets("");
             drag.start = inPage({x: snapX(p.x), y: snapY(p.y)});
         } else {
@@ -2634,6 +2889,11 @@
                 drag.handle = handle.dataset.handle;
                 drag.id = ed.sel;
                 const owner = selected();
+                if (drag.handle === "bdice") {
+                    drag = null;
+                    randomBalloon();
+                    return;
+                }
                 if (drag.handle.startsWith("bm")) {
                     // 辺の真ん中を押したら、そこに頂点を足して、その頂点を動かす
                     const i = Number(drag.handle.slice(2));
@@ -2727,7 +2987,9 @@
         const a = drag.start;
         let b = inPage({x: snapX(p.x), y: snapY(p.y)});
         if (shift) b = Math.abs(b.x - a.x) >= Math.abs(b.y - a.y) ? {x: b.x, y: a.y} : {x: a.x, y: b.y};
-        const s = ensureShape(() => ({id: newId(), type: "line", x1: 0, y1: 0, x2: 0, y2: 0, stroke: prefs.line || 4}));
+        const s = ensureShape(() => (prefs.tool === "hline"
+            ? {id: newId(), type: "hline", x1: 0, y1: 0, x2: 0, y2: 0, ...cleanHlineStyle(prefs.hline), seed: SFX() ? SFX().randomSeed() : 1, name: "", x: 0, y: 0, w: 0, h: 0}
+            : {id: newId(), type: "line", x1: 0, y1: 0, x2: 0, y2: 0, stroke: prefs.line || 4}));
         Object.assign(s, {x1: round1(a.x), y1: round1(a.y), x2: round1(b.x), y2: round1(b.y)});
     }
 
@@ -2810,7 +3072,7 @@
             return;
         }
         const q2 = inPage({x: snapX(p.x), y: snapY(p.y)});
-        if (s.type === "line") {
+        if (s.type === "line" || s.type === "hline") {
             const fixed = drag.handle === "p1" ? {x: o.x2, y: o.y2} : {x: o.x1, y: o.y1};
             let b = q2;
             if (shift) b = Math.abs(b.x - fixed.x) >= Math.abs(b.y - fixed.y) ? {x: b.x, y: fixed.y} : {x: fixed.x, y: b.y};
@@ -2916,7 +3178,7 @@
         if (svg.hasPointerCapture(e.pointerId)) svg.releasePointerCapture(e.pointerId);
         if (d.kind === "newline" || d.kind === "newrect") {
             const s = d.id && shapeOf(d.id);
-            const small = s && (s.type === "line" ? Math.hypot(s.x2 - s.x1, s.y2 - s.y1) < MIN_SIZE : s.w < MIN_SIZE || s.h < MIN_SIZE);
+            const small = s && (s.type === "line" || s.type === "hline" ? Math.hypot(s.x2 - s.x1, s.y2 - s.y1) < MIN_SIZE : s.w < MIN_SIZE || s.h < MIN_SIZE);
             // 描き終えたら選択は外す。続けて描ける
             ed.sel = null;
             if (s && small) ed.page.shapes = ed.page.shapes.filter((x) => x !== s);
@@ -3084,9 +3346,9 @@
             stop();
             const step = e.shiftKey ? 10 : 1;
             nudge({ArrowLeft: -step, ArrowRight: step}[e.key] || 0, {ArrowUp: -step, ArrowDown: step}[e.key] || 0);
-        } else if (key === "v" || key === "l" || key === "r" || key === "y" || key === "t") {
+        } else if (key === "v" || key === "l" || key === "w" || key === "r" || key === "y" || key === "t") {
             stop();
-            setTool({v: "select", l: "line", r: "rect", y: "tri", t: "text"}[key]);
+            setTool({v: "select", l: "line", w: "hline", r: "rect", y: "tri", t: "text"}[key]);
         } else if (key === "e") {
             stop();
             toggleVertexMode();
@@ -3096,6 +3358,9 @@
         } else if (key === "g" && selected() && selected().type === "sfx") {
             stop();
             rerollSfx();
+        } else if (key === "g" && selected() && selected().type === "hline") {
+            stop();
+            rerollHline();
         } else if (key === "b" && selected() && (selected().type === "text" || selected().type === "sfx")) {
             stop();
             toggleBalloon();

@@ -277,6 +277,9 @@ PAGE_SIZE_MIN = 64
 PAGE_SIZE_MAX = 8192
 PAGE_STROKES = (0, 4, 8, 12, 16, 24)    # 0 は線なし（四角だけ）
 PAGE_NAME_MAX = 40
+HLINE_WIDTH = (2, 200)
+HLINE_WOBBLE = (0, 100)
+HLINE_OUTLINE = (0, 16)
 
 
 def _number(value, default=0.0):
@@ -320,6 +323,15 @@ def _panel_points(raw):
         pts.append([_number(p[0]), _number(p[1])])
     area = sum(a[0] * b[1] - b[0] * a[1] for a, b in zip(pts, pts[1:] + pts[:1])) / 2
     return pts if abs(area) >= 16 else None
+
+
+# 手描き線の乱数の種（0〜2147483647 の整数）。_number はページの大きさに合わせて大きな値を捨てるので使わない
+def _shape_seed(value):
+    try:
+        value = int(value)
+    except (TypeError, ValueError, OverflowError):
+        return 1
+    return value if 0 <= value <= 2147483647 else 1
 
 
 def _panel_cut(raw, cut_ids):
@@ -380,6 +392,24 @@ def _sanitize_page(raw, cut_ids):
             text = _sanitize_text(s)
             if text:
                 shapes.append(text)
+        elif s.get("type") == "hline":
+            # 手描き線。形は始点・終点・太さ・揺れ・種で決まり、ブラウザで描く。書き出しには、ブラウザで描いた画像（name）を
+            # x, y, w, h の枠に置く（オノマトペと同じ）。素材と同じ層に、並び順に重ねる
+            name = str(s.get("name", ""))
+            outline = int(_ranged(s.get("outline"), *HLINE_OUTLINE, 0))
+            shapes.append({
+                "id": _safe_id(s.get("id")),
+                "type": "hline",
+                **{k: _number(s.get(k)) for k in ("x1", "y1", "x2", "y2", "x", "y", "w", "h")},
+                "width": int(_ranged(s.get("width"), *HLINE_WIDTH, 12)),
+                "wobble": int(_ranged(s.get("wobble"), *HLINE_WOBBLE, 30)),
+                "color": _color(s.get("color"), "#000000"),
+                "outline": outline,
+                "outlineColor": _color(s.get("outlineColor"), "#ffffff"),
+                "seed": _shape_seed(s.get("seed")),
+                "name": name if re.fullmatch(MATERIAL_NAME, name) else "",
+                **({"key": str(s.get("key"))[:64]} if s.get("key") else {}),
+            })
         elif s.get("type") == "sfx":
             # オノマトペ。形は params で決まり、ブラウザで描く。書き出しには、ブラウザで描いた画像（素材と同じ置き場所の name）を使う。
             # 素材と同じ層に、並び順に重ねる
@@ -1315,7 +1345,7 @@ def render_page(project, page):
     for s in page["shapes"]:
         if s["type"] == "sfx":
             _paste_balloon(canvas, s)
-        if s["type"] in ("material", "sfx") and s["name"]:
+        if s["type"] in ("material", "sfx", "hline") and s["name"] and s["w"] >= 1 and s["h"] >= 1:
             _paste_material(canvas, project, s)
     # 4. セリフはいちばん上に、並び順に
     for s in page["shapes"]:
