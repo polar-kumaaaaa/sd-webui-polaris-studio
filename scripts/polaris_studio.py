@@ -280,6 +280,9 @@ PAGE_NAME_MAX = 40
 HLINE_WIDTH = (2, 200)
 HLINE_WOBBLE = (0, 100)
 HLINE_OUTLINE = (0, 16)
+HLINE_SNAKE = (0, 100)
+HLINE_SNAKE_FROM = (0, 95)
+HLINE_SNAKE_WAVES = (1, 12)
 
 
 def _number(value, default=0.0):
@@ -407,6 +410,10 @@ def _sanitize_page(raw, cut_ids):
                 "outline": outline,
                 "outlineColor": _color(s.get("outlineColor"), "#ffffff"),
                 "seed": _shape_seed(s.get("seed")),
+                # 蛇行（終わりのほうのくねり）。大きさ・始まる位置（%）・波の数
+                "snake": int(_ranged(s.get("snake"), *HLINE_SNAKE, 0)),
+                "snakeFrom": int(_ranged(s.get("snakeFrom"), *HLINE_SNAKE_FROM, 80)),
+                "snakeWaves": int(_ranged(s.get("snakeWaves"), *HLINE_SNAKE_WAVES, 3)),
                 "name": name if re.fullmatch(MATERIAL_NAME, name) else "",
                 **({"key": str(s.get("key"))[:64]} if s.get("key") else {}),
             })

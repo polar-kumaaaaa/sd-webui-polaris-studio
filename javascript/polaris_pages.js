@@ -307,10 +307,15 @@
     // 始点（x1, y1）から終点（x2, y2）まで、手で引いたように揺れる線。形は太さ・揺れ・乱数の種（seed）で決まる。
     // 線の向きに細かく点を並べ、線と直角の向きにゆっくりした揺れと細かい揺れを足してつなぐ。両端は細くする（筆の入りと抜き）。
     // 書き出しにはオノマトペと同じく、ブラウザで描いた画像（name）を使う。x, y, w, h はその画像を置く枠（描くたびに合わせる）
-    const HLINE_DEFAULT = {width: 12, wobble: 30, color: "#000000", outline: 0, outlineColor: "#ffffff"};
+    // 蛇行（snake）：線の終わりのほうを蛇のようにくねらせる。snakeFrom（線の何 % から）でくねりが始まり、終点に向けて大きくなる。
+    // snakeWaves はくねりの波の数、snake はその大きさ（0 でくねらない）
+    const HLINE_DEFAULT = {width: 12, wobble: 30, color: "#000000", outline: 0, outlineColor: "#ffffff", snake: 0, snakeFrom: 80, snakeWaves: 3};
     const HLINE_WIDTH = [2, 200];
     const HLINE_WOBBLE = [0, 100];
     const HLINE_OUTLINES = [0, 2, 4, 6, 8, 12, 16];
+    const HLINE_SNAKE = [0, 100];
+    const HLINE_SNAKE_FROM = [0, 95];
+    const HLINE_SNAKE_WAVES = [1, 12];
     const HLINE_VERSION = 1;    // 描き方を変えたら上げる（書き出し用の画像を作り直す）
 
     function seededRng(seed) {
@@ -328,7 +333,7 @@
         const dx = s.x2 - s.x1, dy = s.y2 - s.y1;
         const len = Math.max(Math.hypot(dx, dy), 1);
         const ux = dx / len, uy = dy / len;
-        const n = clamp(Math.round(len / 10), 16, 400);
+        const n0 = clamp(Math.round(len / 10), 16, 400);
         const rnd = seededRng(s.seed);
         const amp = (s.width * 0.8 + 6) * s.wobble / 50;
         // ゆっくりした揺れ：およそ 120 px ごとの点をなめらかにつなぐ
@@ -336,16 +341,34 @@
         const slow = Array.from({length: k + 1}, () => rnd());
         // 細かい揺れと太さのむら：点ごとの乱数を隣とならす
         const smooth = (arr) => arr.map((v, i) => (arr[Math.max(0, i - 1)] + v * 2 + arr[Math.min(arr.length - 1, i + 1)]) / 4);
-        const fine = smooth(smooth(Array.from({length: n + 1}, () => rnd())));
-        const thick = smooth(smooth(Array.from({length: n + 1}, () => rnd())));
+        const fine = smooth(smooth(Array.from({length: n0 + 1}, () => rnd())));
+        const thick = smooth(smooth(Array.from({length: n0 + 1}, () => rnd())));
+        const at = (arr, t) => {
+            const f = t * n0, j = Math.min(Math.floor(f), n0 - 1);
+            return arr[j] + (arr[j + 1] - arr[j]) * (f - j);
+        };
+        // 蛇行：くねりが始まる所から終点まで、大きさを 0 からなめらかに上げた正弦波を足す。曲がる向きは種で決める
+        const snake = s.snake || 0;
+        const from = (s.snakeFrom ?? HLINE_DEFAULT.snakeFrom) / 100, waves = s.snakeWaves || HLINE_DEFAULT.snakeWaves;
+        const wave = len * (1 - from) / waves;
+        const snakeAmp = snake / 100 * (wave * 0.6 + s.width * 0.5);
+        const snakeDir = snake && rnd() < 0 ? -1 : 1;
+        // くねりがなめらかに見えるよう、波 1 つに 24 点以上を並べる
+        const n = snake ? clamp(Math.max(n0, Math.ceil(waves * 24 / (1 - from))), 16, 800) : n0;
         const centers = [], widths = [];
         for (let i = 0; i <= n; i++) {
             const t = i / n;
             const f = t * k, j = Math.min(Math.floor(f), k - 1), e = (1 - Math.cos(Math.PI * (f - j))) / 2;
-            const off = amp * (0.75 * (slow[j] * (1 - e) + slow[j + 1] * e) + 0.35 * fine[i]);
+            let off = amp * (0.75 * (slow[j] * (1 - e) + slow[j + 1] * e) + 0.35 * at(fine, t));
+            if (snake && t > from) {
+                const u = (t - from) / (1 - from);
+                const g = Math.min(1, u / 0.7);    // 区間の 7 割で最大の大きさになる
+                const grow = g * g * (3 - 2 * g);
+                off += snakeDir * snakeAmp * grow * Math.sin(2 * Math.PI * waves * u);
+            }
             centers.push([s.x1 + dx * t - uy * off, s.y1 + dy * t + ux * off]);
             const taper = Math.pow(Math.min(1, t / 0.12), 0.6) * Math.pow(Math.min(1, (1 - t) / 0.22), 0.6);
-            widths.push(s.width * Math.max(0.06, taper) * (1 + 0.18 * thick[i]));
+            widths.push(s.width * Math.max(0.06, taper) * (1 + 0.18 * at(thick, t)));
         }
         const left = [], right = [];
         for (let i = 0; i <= n; i++) {
@@ -381,7 +404,9 @@
 
     // 書き出し用の画像が今の形に合っているかを見るためのキー
     function hlineKey(s) {
-        const text = HLINE_VERSION + JSON.stringify([s.x1, s.y1, s.x2, s.y2, s.width, s.wobble, s.color, s.outline, s.outlineColor, s.seed]);
+        const keys = [s.x1, s.y1, s.x2, s.y2, s.width, s.wobble, s.color, s.outline, s.outlineColor, s.seed];
+        if (s.snake) keys.push(s.snake, s.snakeFrom, s.snakeWaves);    // 蛇行なしの線はキーを変えない（作り直さない）
+        const text = HLINE_VERSION + JSON.stringify(keys);
         let h = 0x811c9dc5;
         for (let i = 0; i < text.length; i++) h = Math.imul(h ^ text.charCodeAt(i), 0x01000193);
         return (h >>> 0).toString(36) + text.length.toString(36);
@@ -396,6 +421,9 @@
             color: isColor(o.color) ? o.color.toLowerCase() : HLINE_DEFAULT.color,
             outline: HLINE_OUTLINES.includes(o.outline) ? o.outline : HLINE_DEFAULT.outline,
             outlineColor: isColor(o.outlineColor) ? o.outlineColor.toLowerCase() : HLINE_DEFAULT.outlineColor,
+            snake: num(o.snake, HLINE_SNAKE, HLINE_DEFAULT.snake),
+            snakeFrom: num(o.snakeFrom, HLINE_SNAKE_FROM, HLINE_DEFAULT.snakeFrom),
+            snakeWaves: num(o.snakeWaves, HLINE_SNAKE_WAVES, HLINE_DEFAULT.snakeWaves),
         };
     }
 
@@ -707,6 +735,11 @@
                     <select class="ps-pg-houtline" title="線のフチの太さ（ピクセル）">${HLINE_OUTLINES.map((w) => `<option value="${w}">${w ? w + " px" : "なし"}</option>`).join("")}</select>
                     <input type="color" class="ps-pg-houtcolor" title="フチの色">
                 </label>
+                <span class="ps-pg-hsnake" title="線の終わりのほうを蛇のようにくねらせます。始まりの位置から終点に向けて、だんだん大きくなります">
+                    <label class="ps-pg-size">蛇行 <input type="range" class="ps-pg-hsnake-amp" min="${HLINE_SNAKE[0]}" max="${HLINE_SNAKE[1]}" step="1" title="くねりの大きさ（0 でくねらない）"></label>
+                    <label class="ps-pg-size">ここから <input type="range" class="ps-pg-hsnake-from" min="${HLINE_SNAKE_FROM[0]}" max="${HLINE_SNAKE_FROM[1]}" step="1" title="線のどこからくねらせるか（始点 0 %〜終点の近く 95 %）"><span class="ps-pg-hsnake-from-val"></span></label>
+                    <label class="ps-pg-size">波 <input type="number" class="ps-pg-hsnake-waves" min="${HLINE_SNAKE_WAVES[0]}" max="${HLINE_SNAKE_WAVES[1]}" step="1" title="くねりの波の数"></label>
+                </span>
                 <button type="button" class="mtm-btn ps-pg-hreroll" title="同じ設定のまま、別の揺れ方にします (G)">🎲 別の揺れ</button>
             </div>
             <div class="ps-pg-fontpicker ps-off">
@@ -1226,9 +1259,16 @@
         });
         hnum(".ps-pg-hwidth", "width", HLINE_WIDTH);
         hnum(".ps-pg-hwobble", "wobble", HLINE_WOBBLE);
-        q(".ps-pg-hwidth").addEventListener("keydown", (e) => {
-            if (e.key === "Enter" && !e.isComposing) e.target.blur();
-        });
+        hnum(".ps-pg-hsnake-amp", "snake", HLINE_SNAKE);
+        hnum(".ps-pg-hsnake-from", "snakeFrom", HLINE_SNAKE_FROM);
+        hnum(".ps-pg-hsnake-waves", "snakeWaves", HLINE_SNAKE_WAVES);
+        // 「ここから」は動かしている間も数字を出す
+        q(".ps-pg-hsnake-from").addEventListener("input", (e) => (q(".ps-pg-hsnake-from-val").textContent = e.target.value + " %"));
+        for (const sel of [".ps-pg-hwidth", ".ps-pg-hsnake-waves"]) {
+            q(sel).addEventListener("keydown", (e) => {
+                if (e.key === "Enter" && !e.isComposing) e.target.blur();
+            });
+        }
         q(".ps-pg-hcolor").addEventListener("change", (e) => setHlineStyle("color", e.target.value.toLowerCase()));
         q(".ps-pg-houtline").addEventListener("change", (e) => setHlineStyle("outline", Number(e.target.value)));
         q(".ps-pg-houtcolor").addEventListener("change", (e) => setHlineStyle("outlineColor", e.target.value.toLowerCase()));
@@ -1272,6 +1312,12 @@
         set(".ps-pg-hcolor", t.color);
         set(".ps-pg-houtline", String(t.outline));
         set(".ps-pg-houtcolor", t.outlineColor);
+        set(".ps-pg-hsnake-amp", t.snake);
+        set(".ps-pg-hsnake-from", t.snakeFrom);
+        set(".ps-pg-hsnake-waves", t.snakeWaves);
+        q(".ps-pg-hsnake-from-val").textContent = t.snakeFrom + " %";
+        // くねらせないときは、始まりと波を薄くする
+        q(".ps-pg-hsnake").classList.toggle("ps-pg-hsnake-off", !t.snake);
         q(".ps-pg-hreroll").disabled = !placed;
     }
 

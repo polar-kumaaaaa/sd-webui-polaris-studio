@@ -2589,6 +2589,28 @@ body.mtm-fs-open {
     padding: 3px 6px;
 }
 
+/* 手描き線の蛇行 */
+.ps-pg-hsnake {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding-left: 8px;
+    border-left: 1px solid var(--border-color-primary);
+}
+
+#mtm-fs .ps-pg-size input.ps-pg-hsnake-waves {
+    width: 52px;
+}
+
+.ps-pg-hsnake-from-val {
+    min-width: 34px;
+    font-variant-numeric: tabular-nums;
+}
+
+.ps-pg-hsnake-off label:not(:first-child) {
+    opacity: 0.45;
+}
+
 .ps-pg-hint {
     flex: none;
     padding: 0 14px 8px;
