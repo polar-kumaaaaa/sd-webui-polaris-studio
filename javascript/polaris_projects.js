@@ -285,7 +285,8 @@
                     <button type="button" class="mtm-btn ps-view-restore" title="この画像の生成情報のプロンプトをカット案に戻す">プロンプトを戻す</button>
                     <button type="button" class="mtm-btn ps-view-img2img" title="WebUI の img2img に送る。生成した画像はこのカット案に保存される">img2img に送る</button>
                     <button type="button" class="mtm-btn ps-view-i2i" title="WebUI のインペイントに送る。生成した画像はこのカット案に保存される">インペイントに送る</button>
-                    <button type="button" class="mtm-btn mtm-danger ps-view-delete">削除</button>
+                    <button type="button" class="mtm-btn ps-view-select" title="この画像を一覧の選択に加える・外す (S)。一覧に戻って、まとめて削除や再生成ができます">☐ 選択</button>
+                    <button type="button" class="mtm-btn mtm-danger ps-view-delete" title="この画像を削除 (D)。確認が出ます（Enter で削除）">削除</button>
                     <button type="button" class="mtm-btn ps-view-info">情報</button>
                     <button type="button" class="mtm-btn ps-viewer-close">閉じる</button>
                 </div>
@@ -405,6 +406,7 @@
         q(".ps-view-img2img").addEventListener("click", () => sendToImg2img("img2img"));
         q(".ps-view-i2i").addEventListener("click", () => sendToImg2img("inpaint"));
         q(".ps-view-delete").addEventListener("click", () => askDeleteImages([selKey(viewCut, viewImage.name)], "画像を削除"));
+        q(".ps-view-select").addEventListener("click", toggleViewSelect);
         q(".ps-view-info").addEventListener("click", () => {
             setViewerInfo(q(".ps-viewer-info").classList.contains("ps-off"));
             try {
@@ -482,6 +484,19 @@
             toggleViewFavorite();
             return;
         }
+        // S で一覧の選択に加える・外す、D で削除（確認の「削除」ボタンに移るので、Enter で削除、Esc でやめる）
+        if (viewer && !isOpen(".ps-delete-dialog") && /^[sSdD]$/.test(e.key) && !e.ctrlKey && !e.metaKey && !e.altKey
+            && !e.target.closest("input, textarea, select")) {
+            e.preventDefault();
+            e.stopPropagation();
+            if (e.key === "s" || e.key === "S") {
+                toggleViewSelect();
+            } else {
+                askDeleteImages([selKey(viewCut, viewImage.name)], "画像を削除");
+                q(".ps-delete-ok").focus();
+            }
+            return;
+        }
         if (e.key !== "Escape") return;
         // Esc は手前の部品から順に閉じる。プロンプト編集が開いていて部品がなければ編集側に任せる
         // 全画面の窓で開いた一覧は手前の部品として、インラインの一覧はダイアログなどの後に閉じる
@@ -541,6 +556,8 @@
     function setVisible(visible) {
         fs.classList.toggle("mtm-hidden", !visible);
         document.body.classList.toggle("mtm-fs-open", visible);
+        // プロンプト大辞典のパネルを借りていたら、隠す間は WebUI に返す（表示を戻したら借り直す）
+        window.PolarisStudio.dictVisible(visible);
     }
 
     function close() {
@@ -2556,6 +2573,7 @@
     let viewList = [];
     let viewImage = null;
     let viewCut = null;     // 表示中の画像のカット案
+    let viewFromEditor = false;     // 編集画面の上段のサムネイルから開いたか
     let viewIndex = 0;
     let zoom = 1;
     let fitting = true;
@@ -2575,7 +2593,8 @@
 
     const isEntry = (x, cut, image) => x.cut.id === cut.id && x.image.name === image.name;
 
-    function openViewer(image, cut = galleryCut) {
+    function openViewer(image, cut = galleryCut, fromEditor = false) {
+        viewFromEditor = fromEditor;
         viewList = viewEntries();
         let info = false;
         try {
@@ -2593,7 +2612,28 @@
         q(".ps-gallery-search").value = "";
         q(".ps-gallery-source").value = "";
         q(".ps-gallery-fav").checked = false;
-        openViewer(image);
+        openViewer(image, cut, true);
+    }
+
+    // ビューワーの「選択」。編集画面の上段から開いたときは上段のサムネイルの選択、ほかはサムネイル一覧の選択に加える
+    function isViewSelected() {
+        if (!viewImage || !viewCut) return false;
+        if (viewFromEditor) return window.PolarisStudio.thumbSelected(viewImage.name);
+        return selectedImages.has(selKey(viewCut, viewImage.name));
+    }
+
+    function toggleViewSelect() {
+        if (!viewImage || !viewCut) return;
+        if (viewFromEditor) {
+            window.PolarisStudio.toggleThumb(viewImage.name);
+        } else {
+            const k = selKey(viewCut, viewImage.name);
+            if (selectedImages.has(k)) selectedImages.delete(k);
+            else selectedImages.add(k);
+            selectAnchor = viewImage.name;
+            if (galleryCut && isOpen(".ps-gallery-view")) renderGallery();
+        }
+        renderViewMarks();
     }
 
     function showImage(image, cut = viewCut) {
@@ -2635,11 +2675,16 @@
         const fav = isFavorite(viewCut, viewImage.name);
         const box = q(".ps-viewer-marks");
         box.textContent = "";
+        const picked = isViewSelected();
+        if (picked) box.appendChild(el("span", {class: "ps-view-selmark", text: "✓ 選択中", title: "一覧の選択に入っています (S で外す)"}));
         if (panels.length) box.appendChild(panelMark(panels));
         if (fav) box.appendChild(favoriteMark());
         const button = q(".ps-view-fav");
         button.textContent = fav ? "♥ お気に入り" : "♡ お気に入り";
         button.classList.toggle("ps-view-fav-on", fav);
+        const sel = q(".ps-view-select");
+        sel.textContent = picked ? "☑ 選択中" : "☐ 選択";
+        sel.classList.toggle("ps-view-select-on", picked);
         placeViewMarks();
     }
 

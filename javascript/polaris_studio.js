@@ -344,7 +344,17 @@
                     <label class="mtm-fs-param" title="このカット案のプレビューの Variation strength（0〜1）">Var<input type="number" class="mtm-fs-var" min="0" max="1" step="0.01"></label>
                     <div class="mtm-fs-progress mtm-hidden"></div>
                     <span class="mtm-fs-spacer"></span>
+                    <button type="button" class="mtm-btn mtm-fs-dict ps-off" title="拡張機能「プロンプト大辞典」を右に出します。「挿入」は、最後にカーソルを置いたプロンプト欄（ポジティブかネガティブ）のカーソル位置に入ります">📖 大辞典</button>
                     <button type="button" class="mtm-btn mtm-fs-queues" title="プロジェクト全体のキューを管理（編集中の内容はそのまま）">▶ キュー管理</button>
+                </div>
+                <div class="ps-ed-dict ps-off">
+                    <div class="ps-ed-dict-head">
+                        <span class="ps-ed-label">プロンプト大辞典</span>
+                        <span class="ps-ed-note ps-ed-dict-target"></span>
+                        <span class="mtm-fs-spacer"></span>
+                        <button type="button" class="mtm-icon ps-ed-dict-close" title="閉じる">✕</button>
+                    </div>
+                    <div class="ps-ed-dict-body"></div>
                 </div>
                 <div class="ps-ed-thumbs"></div>
                 <div class="ps-ed-picker">
@@ -466,6 +476,22 @@
         fq(".mtm-fs-queue").addEventListener("click", () => leaveEditor(() => editor.onQueue(editor.cut)));
         // キュー管理はカット案の内容を使わないので、保存の確認なしで開く
         fq(".mtm-fs-queues").addEventListener("click", (e) => editor.onQueues(e.currentTarget));
+        fq(".mtm-fs-dict").addEventListener("click", () => (dictHome ? closeDict() : openDict()));
+        fq(".ps-ed-dict-close").addEventListener("click", closeDict);
+        // 大辞典の「挿入」は、WebUI の prompt 欄ではなく編集画面のプロンプト欄に入れる（大辞典の処理より先に受け取って止める）
+        fq(".ps-ed-dict-body").addEventListener("click", (e) => {
+            const button = e.target.closest("[data-pd-insert]");
+            if (!button) return;
+            e.preventDefault();
+            e.stopPropagation();
+            insertDictTag(button.dataset.pdInsert);
+            const status = fq(".ps-ed-dict-body .pd-inline-status");
+            if (status) status.textContent = "挿入しました";
+        }, true);
+        for (const area of [posArea(), negArea()]) area.addEventListener("focus", () => {
+            lastPromptArea = area;
+            updateDictTarget();
+        });
         fq(".mtm-fs-add-cat").addEventListener("click", () => openCategoryDialog(null));
         fq(".ps-ed-add").addEventListener("click", () => addPick(entryById(fsLeftSel)));
         fq(".ps-ed-remove").addEventListener("click", () => removePick(entryById(fsRightSel)));
@@ -600,9 +626,97 @@
         renderEditor();
         renderThumbs();
         fs.focus();
+        // プロンプト大辞典が入っていればボタンを出し、前に開いていたら開く
+        lastPromptArea = posArea();
+        fq(".mtm-fs-dict").classList.toggle("ps-off", !dictPanel());
+        let reopen = false;
+        try {
+            reopen = localStorage.getItem(DICT_KEY) === "1";
+        } catch (e) { /* 読めなければ閉じたまま */ }
+        if (reopen && dictPanel()) {
+            openDict();
+            fs.focus();
+        }
+    }
+
+    // ---------- プロンプト大辞典（別の拡張機能） ----------
+    // sd-webui-prompt-dictionary が txt2img に置くパネルを、開いている間だけ編集画面の右に移す。閉じたら元の場所に戻す
+
+    const DICT_KEY = "polaris-studio:dict-open";
+    let dictHome = null;            // 移す前の {parent, next, wasOpen}。null なら移していない
+    let lastPromptArea = null;      // 「挿入」を入れるプロンプト欄（最後にカーソルを置いた方）
+
+    function dictPanel() {
+        const root = typeof gradioApp === "function" ? gradioApp() : document;
+        return root.querySelector("#pd_inline_panel_txt2img") || document.getElementById("pd_inline_panel_txt2img");
+    }
+
+    function openDict() {
+        const panel = dictPanel();
+        if (!panel || dictHome) return;
+        const body = panel.querySelector(".pd-inline-body");
+        dictHome = {parent: panel.parentNode, next: panel.nextSibling, wasOpen: !!body && !body.hidden};
+        fq(".ps-ed-dict-body").appendChild(panel);
+        // 折りたたんであれば開く（大辞典の見出しのボタンで開け閉めする）
+        if (body && body.hidden) panel.querySelector(".pd-inline-head").click();
+        fq(".ps-ed-dict").classList.remove("ps-off");
+        fq(".ps-editor").classList.add("ps-dict-open");
+        fq(".mtm-fs-dict").classList.add("mtm-active");
+        updateDictTarget();
+        rememberDict(true);
+        const query = panel.querySelector(".pd-inline-query");
+        if (query) query.focus();
+    }
+
+    // 元の場所に戻す。remember が false のとき（編集画面を閉じたとき）は、開いていたことを覚えたままにする
+    function closeDict(remember = true) {
+        if (!dictHome) return;
+        const panel = fq(".ps-ed-dict-body .pd-inline-panel");
+        if (panel) {
+            const body = panel.querySelector(".pd-inline-body");
+            if (!dictHome.wasOpen && body && !body.hidden) panel.querySelector(".pd-inline-head").click();
+            if (dictHome.parent && dictHome.parent.isConnected) dictHome.parent.insertBefore(panel, dictHome.next && dictHome.next.parentNode === dictHome.parent ? dictHome.next : null);
+        }
+        dictHome = null;
+        fq(".ps-ed-dict").classList.add("ps-off");
+        fq(".ps-editor").classList.remove("ps-dict-open");
+        fq(".mtm-fs-dict").classList.remove("mtm-active");
+        if (remember !== false) rememberDict(false);
+    }
+
+    function rememberDict(on) {
+        try {
+            localStorage.setItem(DICT_KEY, on ? "1" : "0");
+        } catch (e) { /* 覚えられなくても動く */ }
+    }
+
+    function updateDictTarget() {
+        const negative = lastPromptArea === negArea();
+        fq(".ps-ed-dict-target").textContent = `挿入先：${negative ? "ネガティブ" : "ポジティブ"}`;
+    }
+
+    // カーソルの位置に、前後の区切り（, ）を補って入れる。Ctrl+Z で戻せるよう、できれば入力として入れる
+    function insertDictTag(tag) {
+        tag = String(tag || "").trim();
+        if (!tag) return;
+        const area = lastPromptArea || posArea();
+        const value = area.value;
+        const start = typeof area.selectionStart === "number" ? area.selectionStart : value.length;
+        const end = typeof area.selectionEnd === "number" ? area.selectionEnd : start;
+        const before = value.slice(0, start), after = value.slice(end);
+        const prefix = before.trim() ? (/[,，]\s*$/.test(before) ? (/\s$/.test(before) ? "" : " ") : ", ") : "";
+        const suffix = after.trim() && !/^\s*[,，]/.test(after) ? ", " : "";
+        const text = prefix + tag + suffix;
+        area.focus();
+        area.setSelectionRange(start, end);
+        if (!document.execCommand("insertText", false, text)) {
+            area.setRangeText(text, start, end, "end");
+            area.dispatchEvent(new Event("input", {bubbles: true}));
+        }
     }
 
     function closeEditor() {
+        closeDict(false);
         closeDialog();
         closeCategoryDialog();
         closeHistory();
@@ -1608,7 +1722,20 @@
             return fs;
         },
         // 全画面の土台を共有しているので、プロジェクト管理の画面を出す間はプロンプト編集のウィンドウを隠す
+        dictVisible(visible) {
+            if (!fs || !editor) return;
+            if (!visible) {
+                closeDict(false);
+                return;
+            }
+            let reopen = false;
+            try {
+                reopen = localStorage.getItem(DICT_KEY) === "1";
+            } catch (e) { /* 読めなければ閉じたまま */ }
+            if (reopen && !dictHome && !fq(".ps-editor").classList.contains("ps-off")) openDict();
+        },
         hideEditor() {
+            closeDict(false);
             fq(".ps-editor").classList.add("ps-off");
         },
         openEditor,
@@ -1629,6 +1756,17 @@
         },
         isEditing(cut) {
             return !!editor && editor.cut === cut;
+        },
+        // 上段のサムネイルの選択（ビューワーの S キーで使う）
+        thumbSelected(name) {
+            return thumbSel.has(name);
+        },
+        toggleThumb(name) {
+            if (!editor) return;
+            if (thumbSel.has(name)) thumbSel.delete(name);
+            else thumbSel.add(name);
+            thumbAnchor = name;
+            renderThumbs();
         },
         // ビューワーの「プロンプトを戻す」。編集中は保存せず、プロンプト欄に入れるだけにする
         setEditorPrompt(positive, negative) {
