@@ -22,8 +22,9 @@
     background: var(--button-primary-background-fill-hover);
 }
 
-/* img2img の上の帯（インペイントの保存先がポラスタのカット案になっている間だけ出す） */
-#tab_img2img > .ps-i2i-banner {
+/* img2img・txt2img の上の帯（保存先がポラスタのカット案になっている間だけ出す） */
+#tab_img2img > .ps-i2i-banner,
+#tab_txt2img > .ps-i2i-banner {
     flex: none;
     display: flex;
     align-items: center;
@@ -38,17 +39,20 @@
     color: var(--body-text-color);
 }
 
-#tab_img2img > .ps-i2i-banner.ps-off {
+#tab_img2img > .ps-i2i-banner.ps-off,
+#tab_txt2img > .ps-i2i-banner.ps-off {
     display: none;
 }
 
-#tab_img2img > .ps-i2i-banner .ps-i2i-text {
+#tab_img2img > .ps-i2i-banner .ps-i2i-text,
+#tab_txt2img > .ps-i2i-banner .ps-i2i-text {
     flex: 1;
     min-width: 0;
     font-weight: 600;
 }
 
-#tab_img2img > .ps-i2i-banner button {
+#tab_img2img > .ps-i2i-banner button,
+#tab_txt2img > .ps-i2i-banner button {
     flex: none;
     width: auto;
     min-width: 0;
@@ -60,7 +64,8 @@
     cursor: pointer;
 }
 
-#tab_img2img > .ps-i2i-banner button.ps-i2i-back {
+#tab_img2img > .ps-i2i-banner button.ps-i2i-back,
+#tab_txt2img > .ps-i2i-banner button.ps-i2i-back {
     border-color: var(--button-primary-border-color);
     background: var(--button-primary-background-fill);
     color: var(--button-primary-text-color);

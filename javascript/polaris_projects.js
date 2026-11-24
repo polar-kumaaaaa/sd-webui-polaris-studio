@@ -206,8 +206,9 @@
                     <input type="search" class="ps-gallery-search" placeholder="プロンプト、Seed、Sampler などで検索">
                     <select class="ps-gallery-source">
                         <option value="">すべての生成元</option>
-                        <option value="preview">プレビュー</option>
+                        <option value="preview">生成</option>
                         <option value="queue">キュー</option>
+                        <option value="txt2img">txt2img</option>
                         <option value="i2i">i2i</option>
                     </select>
                     <label class="ps-fav-only" title="お気に入り（♥）にした画像だけを出します"><input type="checkbox" class="ps-gallery-fav"> ♥ お気に入りのみ</label>
@@ -1030,7 +1031,7 @@
         cutBar.append(
             el("div", {class: "ps-cut-bar-row"}, [
                 el("button", {type: "button", class: "mtm-btn ps-cut-bar-edit", text: "プロンプト編集", onclick: run(() => openEditor(cut))}),
-                el("button", {type: "button", class: "mtm-btn mtm-primary", title: "1枚だけ今すぐ生成", text: "プレビュー", onclick: run(() => runPreview(cut))}),
+                el("button", {type: "button", class: "mtm-btn mtm-primary", title: "1枚だけ今すぐ生成。このあと WebUI の txt2img で生成した画像も、解除するまでこのカット案に入ります", text: "生成", onclick: run(() => runPreview(cut))}),
                 el("button", {type: "button", class: "mtm-btn mtm-primary ps-cut-bar-queue", title: "キューを登録", text: "キュー" + (count ? " " + count : ""), onclick: run(() => openQueueForm(cut))}),
             ]),
             el("div", {class: "ps-cut-bar-row"}, [
@@ -1121,7 +1122,7 @@
         await saveProjects();
     }
 
-    // 複製では画像とキューを引き継がない。プロンプトとプレビューの設定は引き継ぐ
+    // 複製では画像とキューを引き継がない。プロンプトと生成の設定は引き継ぐ
     async function duplicateCut(scene, cut) {
         const copy = {
             ...JSON.parse(JSON.stringify(cut)),
@@ -1241,13 +1242,13 @@
     }
 
     // ---------- 生成の進捗のトースト ----------
-    // プレビューとキューの生成中は、画面右上（上部バーのすぐ下）に進捗を出す。どの画面にいても見える
+    // 「生成」とキューの生成中は、画面右上（上部バーのすぐ下）に進捗を出す。どの画面にいても見える
 
     const TOAST_HIDE = 6000;    // 終わってから消すまで
     let toast = null;
     let toastHideTimer = null;
     let toastStop = null;
-    let toastOpen = null;       // 生成した画像を開く関数（プレビューの結果）
+    let toastOpen = null;       // 生成した画像を開く関数（「生成」の結果）
 
     function buildToast() {
         toast = el("div", {class: "ps-toast ps-off", role: "status"}, [
@@ -1332,7 +1333,7 @@
         if (btn) btn.click();
     }
 
-    // ---------- プレビュー（常に1枚） ----------
+    // ---------- 生成（常に1枚。内部では preview と呼ぶ） ----------
     // 生成中も画面は操作できる。進捗と結果はトーストに出し、生成した画像はトーストから開く
 
     async function runPreview(cut) {
@@ -1349,8 +1350,10 @@
         const before = imagesOf(p, cut).length;
         generating = true;
         if (isOpen(".ps-queues-view")) renderQueueManager();
-        startToast("プレビュー", cut.title, interruptGeneration);
+        startToast("生成", cut.title, interruptGeneration);
         window.PolarisStudio.onProgress((text, info) => updateToast(info));
+        // このあと WebUI の txt2img で生成した画像も、解除するまでこのカット案に入れる
+        linkTxt2img(p, cut);
         try {
             await window.PolarisStudio.generate({
                 project: p.id, cut: cut.id, source: "preview",
@@ -1363,18 +1366,18 @@
             const list = imagesOf(p, cut);
             if (list.length > before) {
                 const image = list[list.length - 1];
-                endToast("プレビュー", cut.title + " を生成しました（画像を押すと開きます）", true, {
+                endToast("生成", cut.title + " を生成しました（画像を押すと開きます）", true, {
                     src: imageUrl(p, cut, image, true),
                     open: () => {
                         if (project === p && sceneOf(cut)) openViewerFor(cut, image);
                     },
                 });
             } else {
-                endToast("プレビュー", "画像は生成されませんでした", false);
+                endToast("生成", "画像は生成されませんでした", false);
             }
         } catch (e) {
             console.error("[Polaris Studio] preview failed", e);
-            endToast("プレビュー", "生成に失敗しました: " + e.message, false);
+            endToast("生成", "生成に失敗しました: " + e.message, false);
         }
         window.PolarisStudio.onProgress(null);
         generating = false;
@@ -2340,6 +2343,7 @@
 
     function sourceKind(image) {
         if (image.source === "preview") return "preview";
+        if (image.source === "txt2img") return "txt2img";
         if (image.source.startsWith("i2i:")) return "i2i";
         return image.source ? "queue" : "";
     }
@@ -2857,6 +2861,57 @@
             renderI2iBanner(data.target);
         } catch (e) {
             console.error("[Polaris Studio] i2i state failed", e);
+        }
+        loadT2i();
+    }
+
+    // ---------- txt2img の保存先 ----------
+    // ポラスタの「生成」を押すと、そのあと WebUI の txt2img で生成した画像も、解除するまでそのカット案に入る。
+    // txt2img の画面の上に、保存先のカット案と解除ボタンを出す（img2img と同じ帯）
+
+    let t2iBanner = null;
+
+    async function linkTxt2img(p, cut) {
+        try {
+            const target = (await postJson("polaris-studio/t2i", {project: p.id, cut: cut.id, label: `${p.title} / ${cut.title}`})).target;
+            renderT2iBanner(target);
+        } catch (e) {
+            console.error("[Polaris Studio] txt2img link failed", e);
+        }
+    }
+
+    function renderT2iBanner(target) {
+        const tab = gradioApp().querySelector("#tab_txt2img");
+        if (!tab) return;
+        if (!t2iBanner) {
+            t2iBanner = el("div", {class: "ps-i2i-banner ps-t2i-banner"}, [
+                el("span", {class: "ps-i2i-text"}),
+                el("button", {type: "button", class: "ps-i2i-back", text: "ポラスタに戻る", onclick: toggle}),
+                el("button", {type: "button", class: "ps-i2i-clear", text: "解除", title: "txt2img で生成した画像を通常の出力先に保存するように戻す", onclick: clearT2i}),
+            ]);
+        }
+        if (!t2iBanner.isConnected) tab.prepend(t2iBanner);
+        t2iBanner.classList.toggle("ps-off", !target);
+        if (target) t2iBanner.querySelector(".ps-i2i-text").textContent = `ポラスタ：${target.label} に保存中（txt2img で生成した画像）`;
+    }
+
+    async function clearT2i() {
+        try {
+            await postJson("polaris-studio/t2i/clear", {});
+        } catch (e) {
+            alert("解除できませんでした。\n" + e);
+            return;
+        }
+        renderT2iBanner(null);
+    }
+
+    async function loadT2i() {
+        try {
+            const res = await fetch("polaris-studio/t2i", {cache: "no-store"});
+            const data = await res.json();
+            renderT2iBanner(data.target);
+        } catch (e) {
+            console.error("[Polaris Studio] txt2img state failed", e);
         }
     }
 

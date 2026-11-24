@@ -655,6 +655,7 @@ JOB_LIFETIME = 60
 
 _job = None             # 次の生成の保存先 {project, cut, source, at}
 _i2i = None             # img2img の保存先。解除するまで続く {project, cut, source, label}
+_t2i = None             # WebUI の txt2img で生成した画像の保存先。ポラスタの「生成」で決まり、解除するまで続く {project, cut, source, label}
 _info_cache = {}        # (パス, 更新時刻) → 画像のメタ情報
 
 
@@ -1391,7 +1392,8 @@ def take_job():
 
 class PolarisJobScript(scripts.Script):
     """JS から頼まれた生成だけ、保存先をカット案のフォルダにして、識別子を生成情報に入れる。
-    txt2img は1回の生成ごとに頼まれる。img2img はビューワーから送ったあと、解除するまでずっと続く。"""
+    txt2img は1回の生成ごとに頼まれる。頼まれていない txt2img の生成は、ポラスタの「生成」で決めた保存先（_t2i）があればそこに入れる。
+    img2img はビューワーから送ったあと、解除するまでずっと続く。"""
 
     def title(self):
         return "Polaris Studio"
@@ -1400,7 +1402,7 @@ class PolarisJobScript(scripts.Script):
         return scripts.AlwaysVisible
 
     def before_process(self, p, *args):
-        job = _i2i if self.is_img2img else take_job()
+        job = _i2i if self.is_img2img else (take_job() or _t2i)
         if job is None:
             return
         p.outpath_samples = cut_dir(job["project"], job["cut"])
@@ -1452,6 +1454,26 @@ def on_app_started(demo, app):
     def clear_i2i():
         global _i2i
         _i2i = None
+        return {"ok": True}
+
+    @app.get("/polaris-studio/t2i")
+    def get_t2i():
+        return {"ok": True, "target": _t2i}
+
+    @app.post("/polaris-studio/t2i")
+    def set_t2i(payload: dict = Body(...)):
+        global _t2i
+        try:
+            cut_dir(payload.get("project"), payload.get("cut"))
+        except ValueError as e:
+            return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
+        _t2i = {"project": str(payload["project"]), "cut": str(payload["cut"]), "source": "txt2img", "label": str(payload.get("label", ""))[:200]}
+        return {"ok": True, "target": _t2i}
+
+    @app.post("/polaris-studio/t2i/clear")
+    def clear_t2i():
+        global _t2i
+        _t2i = None
         return {"ok": True}
 
     @app.get("/polaris-studio/images")
@@ -1572,7 +1594,7 @@ def on_app_started(demo, app):
     # カット案（cut あり）またはプロジェクト（cut なし）のフォルダを実ファイルごと削除する（ごみ箱が使えればごみ箱へ）
     @app.post("/polaris-studio/folder/delete")
     def delete_folder(payload: dict = Body(...)):
-        global _i2i
+        global _i2i, _t2i
         try:
             cut = payload.get("cut")
             path = cut_dir(payload.get("project"), cut) if cut else project_dir(payload.get("project"))
@@ -1583,6 +1605,8 @@ def on_app_started(demo, app):
         # 消したフォルダへの img2img の保存は解除する。残すと、生成したときにフォルダが作り直される
         if _i2i and _i2i["project"] == payload.get("project") and (not cut or _i2i["cut"] == cut):
             _i2i = None
+        if _t2i and _t2i["project"] == payload.get("project") and (not cut or _t2i["cut"] == cut):
+            _t2i = None
         return {"ok": True}
 
     @app.post("/polaris-studio/projects")

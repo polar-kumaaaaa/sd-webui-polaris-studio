@@ -337,11 +337,11 @@
                 <div class="mtm-fs-bar">
                     <button type="button" class="mtm-btn mtm-fs-back">← 戻る</button>
                     <input type="text" class="ps-title-input mtm-fs-cut-title" title="カット案のタイトル">
-                    <span class="mtm-fs-param" title="このカット案で生成する画像のサイズ（幅 × 高さ、8 の倍数）。プレビューとキューの生成に使います。空欄のときは WebUI の設定のままで、最初に生成した画像のサイズを覚えます">サイズ<input type="number" class="mtm-fs-width" min="64" max="2048" step="8" placeholder="幅">×<input type="number" class="mtm-fs-height" min="64" max="2048" step="8" placeholder="高さ"><button type="button" class="mtm-icon mtm-fs-size-swap" title="幅と高さを入れ替える（縦長 ⇄ 横長）">⇄</button></span>
-                    <label class="mtm-fs-param" title="このカット案のプレビューの Sampling steps">Steps<input type="number" class="mtm-fs-steps" min="1" step="1"></label>
-                    <span class="mtm-fs-param" title="このカット案のプレビューの Seed（-1 でランダム）">Seed<input type="number" class="mtm-fs-seed" step="1"><button type="button" class="mtm-icon mtm-fs-seed-random" title="ランダム（-1）にする">🎲</button></span>
-                    <span class="mtm-fs-param" title="このカット案のプレビューの Variation seed（-1 でランダム。Var が 0 のときは生成に使われません）">Var Seed<input type="number" class="mtm-fs-subseed" step="1"><button type="button" class="mtm-icon mtm-fs-subseed-random" title="ランダム（-1）にする">🎲</button></span>
-                    <label class="mtm-fs-param" title="このカット案のプレビューの Variation strength（0〜1）">Var<input type="number" class="mtm-fs-var" min="0" max="1" step="0.01"></label>
+                    <span class="mtm-fs-param" title="このカット案で生成する画像のサイズ（幅 × 高さ、8 の倍数）。「生成」とキューに使います。空欄のときは WebUI の設定のままで、最初に生成した画像のサイズを覚えます">サイズ<input type="number" class="mtm-fs-width" min="64" max="2048" step="8" placeholder="幅">×<input type="number" class="mtm-fs-height" min="64" max="2048" step="8" placeholder="高さ"><button type="button" class="mtm-icon mtm-fs-size-swap" title="幅と高さを入れ替える（縦長 ⇄ 横長）">⇄</button></span>
+                    <label class="mtm-fs-param" title="このカット案の「生成」の Sampling steps">Steps<input type="number" class="mtm-fs-steps" min="1" step="1"></label>
+                    <span class="mtm-fs-param" title="このカット案の「生成」の Seed（-1 でランダム）">Seed<input type="number" class="mtm-fs-seed" step="1"><button type="button" class="mtm-icon mtm-fs-seed-random" title="ランダム（-1）にする">🎲</button></span>
+                    <span class="mtm-fs-param" title="このカット案の「生成」の Variation seed（-1 でランダム。Var が 0 のときは生成に使われません）">Var Seed<input type="number" class="mtm-fs-subseed" step="1"><button type="button" class="mtm-icon mtm-fs-subseed-random" title="ランダム（-1）にする">🎲</button></span>
+                    <label class="mtm-fs-param" title="このカット案の「生成」の Variation strength（0〜1）">Var<input type="number" class="mtm-fs-var" min="0" max="1" step="0.01"></label>
                     <div class="mtm-fs-progress mtm-hidden"></div>
                     <span class="mtm-fs-spacer"></span>
                     <button type="button" class="mtm-btn mtm-fs-dict ps-off" title="拡張機能「プロンプト大辞典」を右に出します。「挿入」は、最後にカーソルを置いたプロンプト欄（ポジティブかネガティブ）のカーソル位置に入ります">📖 大辞典</button>
@@ -392,7 +392,7 @@
                     <span class="mtm-fs-spacer"></span>
                     <button type="button" class="mtm-btn mtm-fs-history" title="保存した版の一覧">履歴</button>
                     <button type="button" class="mtm-btn mtm-primary mtm-fs-save">保存</button>
-                    <button type="button" class="mtm-btn mtm-primary mtm-fs-preview" title="1枚だけ今すぐ生成">プレビュー</button>
+                    <button type="button" class="mtm-btn mtm-primary mtm-fs-preview" title="1枚だけ今すぐ生成。このあと WebUI の txt2img で生成した画像も、解除するまでこのカット案に入ります">生成</button>
                     <button type="button" class="mtm-btn mtm-primary mtm-fs-queue" title="キューを登録">キュー</button>
                 </div>
             </div>
@@ -1318,7 +1318,7 @@
         if (!editor) return;
         const images = editor.images();
         if (!images.length) {
-            box.appendChild(el("div", {class: "ps-ed-thumbs-empty", text: "まだ画像がありません。プレビューかキューで生成すると、ここに並びます"}));
+            box.appendChild(el("div", {class: "ps-ed-thumbs-empty", text: "まだ画像がありません。「生成」かキューで生成すると、ここに並びます"}));
             return;
         }
         const key = editor.keyImage();
