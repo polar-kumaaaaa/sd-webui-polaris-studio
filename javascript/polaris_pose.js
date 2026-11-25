@@ -41,6 +41,7 @@
     };
     const HAND_WRIST = {right: 4, left: 7};  // 手と同じ側の体の手首
     const KNOB = 7;                 // 手を回すつまみの半径（画面の px）
+    const KNOB_DIST = 40;           // 手首からつまみまでの距離（画面の px）
     const HIT = 9;                  // 点をつかめる距離（画面の px）
     const UNDO_MAX = 100;
     const VIEW_KEY = "polaris-studio:pose-view";
@@ -433,7 +434,7 @@
                     </section>
                     <section>
                         <div class="ps-pose-head">手</div>
-                        <div class="ps-pose-note">手の点か体の手首を選ぶと、その手を手首を中心に動かせます。手首から出る白い丸をドラッグすると回ります（Shift で 15° ずつ）</div>
+                        <div class="ps-pose-note">手の点か体の手首を選ぶと、その手を手首を中心に動かせます。手首のそばの白い丸をドラッグすると回ります（Shift で 15° ずつ）</div>
                         <div class="ps-pose-row">
                             <button type="button" class="mtm-btn ps-pose-flip" title="手のひらの表と裏を入れ替えます。手首と中指の付け根を結ぶ線で裏返すので、親指が反対側に移ります (H)">反転</button>
                             <button type="button" class="mtm-btn ps-pose-rotl" title="手首を中心に左へ 15° 回します (Q、Shift+Q で 1°)">⟲ 15°</button>
@@ -919,9 +920,12 @@
         });
     }
 
-    // 手を回すつまみ（画面の座標）。手首から中指の付け根の向きに、手の外側へ出す
+    // 手を回すつまみ（画面の座標）。手首のすぐそばの、指と反対側（腕の側）に出す。
+    // 画面の外に出るときは、手首の横（左右どちらか）、それでも外なら指の側に出す
     function handKnobs() {
         if (!show.hands || !model) return [];
+        const stage = q(".ps-pose-stage").getBoundingClientRect();
+        const inside = (x, y) => x >= KNOB + 4 && y >= KNOB + 4 && x <= stage.width - KNOB - 4 && y <= stage.height - KNOB - 4;
         return targetHands().map(({pi, side}) => {
             const pts = model.people[pi][side];
             const c = toScreen(pts[0]);
@@ -936,11 +940,9 @@
                 dx /= len;
                 dy /= len;
             }
-            const r = Math.max(30, ...pts.map((p) => {
-                const s = toScreen(p);
-                return Math.hypot(s.x - c.x, s.y - c.y);
-            })) + 22;
-            return {pi, side, c, x: c.x + dx * r, y: c.y + dy * r};
+            const candidates = [[-dx, -dy], [-dy, dx], [dy, -dx], [dx, dy]].map(([ux, uy]) => ({x: c.x + ux * KNOB_DIST, y: c.y + uy * KNOB_DIST}));
+            const at = candidates.find((p) => inside(p.x, p.y)) || candidates[0];
+            return {pi, side, c, x: at.x, y: at.y};
         });
     }
 
