@@ -91,6 +91,14 @@
     const materialUrl = (p, name) => "polaris-studio/material?" + new URLSearchParams({project: p.id, name});
 
     // キー画像。指定がない、または指定の画像がなくなったときは一番古い画像
+    // ポーズを使うカット案なら、生成に渡すポーズ {pose, control}（キューには登録したときの形をそのまま持たせる）
+    function poseJob(cut) {
+        const pose = cut.pose;
+        const control = cut.poseControl;
+        if (!pose || !Array.isArray(pose.people) || !pose.people.length || !control || !control.use) return null;
+        return JSON.parse(JSON.stringify({pose, control}));
+    }
+
     function keyImageOf(p, cut) {
         const list = imagesOf(p, cut);
         return list.find((x) => x.name === cut.keyImage) || list[0] || null;
@@ -1360,6 +1368,7 @@
                 positive: cut.positive, negative: cut.negative,
                 width: cut.width, height: cut.height,
                 steps: cut.steps, batch: 1, seed: cut.seed, subseed: cut.subseed, subseedStrength: cut.subseedStrength,
+                pose: poseJob(cut),
             });
             await loadImages(p);
             if (adoptSize(p, cut)) await saveProjects();
@@ -1484,6 +1493,7 @@
             negative: cut.negative,
             width: cut.width || 0,
             height: cut.height || 0,
+            pose: poseJob(cut),
             ...readQueueForm(),
             status: "waiting",
             createdAt: new Date().toISOString(),
@@ -1495,7 +1505,7 @@
         await saveProjects();
     }
 
-    const queueValues = (x) => `サイズ ${x.width && x.height ? `${x.width}×${x.height}` : "WebUI のまま"} / Steps ${x.steps} / Batch ${x.batch} / Seed ${x.seed < 0 ? "ランダム" : x.seed} / Var Seed ${x.subseed < 0 ? "ランダム" : x.subseed} / Var ${x.subseedStrength}`;
+    const queueValues = (x) => `サイズ ${x.width && x.height ? `${x.width}×${x.height}` : "WebUI のまま"} / Steps ${x.steps} / Batch ${x.batch} / Seed ${x.seed < 0 ? "ランダム" : x.seed} / Var Seed ${x.subseed < 0 ? "ランダム" : x.subseed} / Var ${x.subseedStrength}${x.pose ? " / ポーズ" : ""}`;
 
     // 登録済みの件数だけを出す。中身の確認・削除・実行はキュー管理で行う
     function renderQueueRows(added = "") {
@@ -2147,6 +2157,8 @@
                 positive: image.positive, negative: image.negative,
                 steps: x.steps, batch: 1, seed: image.seed, subseed: image.subseed, subseedStrength: image.subseedStrength,
                 width: image.width, height: image.height,
+                // 作り直すときは、カット案の今のポーズを使う
+                pose: poseJob(cut),
             });
             made++;
         }
@@ -2206,6 +2218,7 @@
                         project: p.id, cut: x.cutId, source: x.name,
                         positive: x.positive, negative: x.negative, width: x.width, height: x.height,
                         steps: x.steps, batch: x.batch, seed: x.seed, subseed: x.subseed, subseedStrength: x.subseedStrength,
+                        pose: x.pose || null,
                     });
                     if (!run.abort) x.status = "done";
                     // サイズを決めずに登録したキューなら、カット案に生成した画像のサイズを覚える
@@ -2935,6 +2948,7 @@
             onQueues: toggleQueueManager,
             images: () => imagesOf(project, cut),
             thumbUrl: (image) => imageUrl(project, cut, image, true),
+            imageUrl: (image) => imageUrl(project, cut, image, false),
             keyImage: () => keyImageOf(project, cut),
             openImage: (image) => openViewerFor(cut, image),
             // 上段のサムネイルの ✕。サムネイル一覧の削除と同じ確認を出す

@@ -2,6 +2,8 @@
 
 プロジェクト（タグ定義・シーン・カット案・キュー）は拡張フォルダ内の data/projects.json に保存する。
 """
+import base64
+import copy
 import hashlib
 import io
 import json
@@ -15,6 +17,7 @@ import zipfile
 
 from fastapi import Body, Request
 from fastapi.responses import FileResponse, JSONResponse, Response
+import numpy as np
 from PIL import Image, ImageChops, ImageDraw, ImageFont
 
 from modules import images, script_callbacks, scripts, shared
@@ -562,6 +565,9 @@ def _sanitize_cut(raw):
         if isinstance(raw.get("favorites"), list) else [],
         # 編集画面の「追加したタグ」の並び（カードの id）。None はまだ一度も保存していないカット案で、開いたときにテキストから作る
         "picks": _unique_strings(raw.get("picks")) if isinstance(raw.get("picks"), list) else None,
+        # OpenPose のポーズ（座標は 0〜1）と、生成で ControlNet に入れるときの設定
+        "pose": _sanitize_pose(raw.get("pose")),
+        "poseControl": _sanitize_pose_control(raw.get("poseControl")),
         "history": [
             {"at": str(h.get("at", "")), "positive": str(h.get("positive", "")), "negative": str(h.get("negative", ""))}
             for h in _dicts(raw.get("history"))
@@ -584,6 +590,8 @@ def _sanitize_queue(raw):
         **_image_size(raw),
         **_generation_params(raw, 37),
         "batch": _positive_int(raw.get("batch"), 10),
+        # 登録したときのカット案のポーズ（使わないときは None）
+        "pose": _sanitize_pose_job(raw.get("pose")),
         # "regen" は、選んだ画像を元のプロンプトと Seed のまま Steps だけ変えて 1 枚ずつ作り直すキュー
         "kind": "regen" if raw.get("kind") == "regen" else "",
         "images": [_sanitize_regen_image(x) for x in _dicts(raw.get("images"))] if raw.get("kind") == "regen" else [],
@@ -628,6 +636,72 @@ def _generation_params(raw, default_steps):
         "subseed": -1 if subseed is None else subseed,
         "subseedStrength": 0.0 if strength is None else strength,
     }
+
+
+POSE_PARTS = {"pose_keypoints_2d": 18, "hand_left_keypoints_2d": 21, "hand_right_keypoints_2d": 21, "face_keypoints_2d": 70}
+POSE_MODES = ("BALANCED", "PROMPT", "CONTROL")
+POSE_MAX_PEOPLE = 20
+
+
+def _clamp_float(value, low, high, default):
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return default
+    if v != v:
+        return default
+    return min(max(v, low), high)
+
+
+# OpenPose の JSON（people の各部位は [x, y, c] の並び）。座標は画像の幅・高さに対する 0〜1。c が 1 未満の点は隠した点
+def _sanitize_pose(raw):
+    if not isinstance(raw, dict):
+        return None
+    people = []
+    for person in _dicts(raw.get("people"))[:POSE_MAX_PEOPLE]:
+        out = {}
+        for key, count in POSE_PARTS.items():
+            values = person.get(key)
+            if not isinstance(values, list) or len(values) != count * 3:
+                out[key] = None
+                continue
+            out[key] = [
+                round(_clamp_float(v, -1.0, 2.0, 0.0), 5) if i % 3 < 2 else (1.0 if _clamp_float(v, 0, 1, 0) >= 1 else 0.0)
+                for i, v in enumerate(values)
+            ]
+        if out["pose_keypoints_2d"] is not None:
+            people.append(out)
+    return {
+        "canvas_width": _positive_int(raw.get("canvas_width"), 512),
+        "canvas_height": _positive_int(raw.get("canvas_height"), 512),
+        "people": people,
+        # 取り出し元の画像（カット案のフォルダの中の名前）。エディタの下敷きに使う
+        "source": os.path.basename(str(raw.get("source", ""))),
+    }
+
+
+def _sanitize_pose_control(raw):
+    raw = raw if isinstance(raw, dict) else {}
+    mode = raw.get("mode")
+    start = _clamp_float(raw.get("start"), 0, 1, 0.0)
+    return {
+        "use": bool(raw.get("use", False)),
+        # ControlNet のユニットの番号（0 から）
+        "unit": int(_clamp_float(raw.get("unit"), 0, 15, 0)),
+        # 空なら、生成のときに名前に openpose を含む最初のモデルを使う
+        "model": str(raw.get("model", ""))[:300],
+        "weight": round(_clamp_float(raw.get("weight"), 0, 2, 1.0), 3),
+        "start": round(start, 3),
+        "end": round(max(_clamp_float(raw.get("end"), 0, 1, 1.0), start), 3),
+        "mode": mode if mode in POSE_MODES else "BALANCED",
+    }
+
+
+def _sanitize_pose_job(raw):
+    if not isinstance(raw, dict):
+        return None
+    pose = _sanitize_pose(raw.get("pose"))
+    return {"pose": pose, "control": _sanitize_pose_control(raw.get("control"))} if pose and pose["people"] else None
 
 
 def _dicts(value):
@@ -1384,6 +1458,81 @@ def book_zip(project, items):
     return buf.getvalue()
 
 
+# 生成に使うポーズ。JS で描いたポーズの画像（PNG の base64）と ControlNet の設定
+def _job_pose(raw):
+    if not isinstance(raw, dict):
+        return None
+    data = str(raw.get("image", ""))
+    if "," in data:
+        data = data.split(",", 1)[1]
+    try:
+        image = Image.open(io.BytesIO(base64.b64decode(data))).convert("RGB")
+    except Exception:
+        raise ValueError("ポーズの画像が読めません")
+    control = _sanitize_pose_control(raw)
+    if not control["model"]:
+        raise ValueError("ControlNet のモデルが決まっていません")
+    return {**control, "image": np.array(image)}
+
+
+def _controlnet_script(p):
+    for s in (p.scripts.alwayson_scripts if p.scripts else []):
+        if type(s).__name__ == "ControlNetForForgeOfficial":
+            return s
+    return None
+
+
+def _enum_member(current, module_attr, name):
+    # reforge と Neo で値の文字列が違うので、名前（BALANCED など）で選ぶ
+    cls = type(current)
+    if not hasattr(cls, "__members__"):
+        try:
+            from lib_controlnet import external_code
+            cls = getattr(external_code, module_attr)
+        except Exception:
+            return current
+    return cls[name] if name in cls.__members__ else current
+
+
+# ControlNet のユニットを、このポーズで生成する設定に差し替える。WebUI の画面の ControlNet の設定は変えない
+def apply_pose(p, pose):
+    cn = _controlnet_script(p)
+    if cn is None:
+        raise RuntimeError("[Polaris Studio] ControlNet が見つからないので、ポーズを使えません")
+    args = list(p.script_args)
+    index = cn.args_from + pose["unit"]
+    if not cn.args_from <= index < cn.args_to:
+        raise RuntimeError(f"[Polaris Studio] ControlNet のユニット {pose['unit'] + 1} がありません（ユニットは {cn.args_to - cn.args_from} 個）")
+    unit = args[index]
+    values = {
+        "enabled": True,
+        "module": "None",
+        "model": pose["model"],
+        "weight": pose["weight"],
+        "guidance_start": pose["start"],
+        "guidance_end": pose["end"],
+        "pixel_perfect": False,
+        # ポーズの画像をプレビューとして入れ、それを入力に使う（ControlNet の Upload JSON と同じ）
+        "use_preview_as_input": True,
+        "generated_image": pose["image"],
+        "image_fg": None,
+        "mask_image": None,
+        "mask_image_fg": None,
+    }
+    if isinstance(unit, dict):
+        unit = {**unit, **values, "control_mode": pose["mode"], "resize_mode": "Crop and Resize"}
+    else:
+        unit = copy.copy(unit)
+        values["control_mode"] = _enum_member(getattr(unit, "control_mode", None), "ControlMode", pose["mode"])
+        values["resize_mode"] = _enum_member(getattr(unit, "resize_mode", None), "ResizeMode", "INNER_FIT")
+        for k, v in values.items():
+            if hasattr(unit, k):
+                setattr(unit, k, v)
+    args[index] = unit
+    p.script_args = tuple(args) if isinstance(p.script_args, tuple) else args
+    print(f"[Polaris Studio] pose -> ControlNet unit {pose['unit'] + 1} ({pose['model']})")
+
+
 def take_job():
     global _job
     job, _job = _job, None
@@ -1412,6 +1561,8 @@ class PolarisJobScript(scripts.Script):
         p.override_settings["samples_save"] = True
         p.extra_generation_params["Polaris Cut"] = job["cut"]
         p.extra_generation_params["Polaris Source"] = job["source"]
+        if job.get("pose"):
+            apply_pose(p, job["pose"])
 
 
 def on_app_started(demo, app):
@@ -1427,7 +1578,11 @@ def on_app_started(demo, app):
             cut_dir(payload.get("project"), payload.get("cut"))
         except ValueError as e:
             return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
-        _job = {"project": payload["project"], "cut": payload["cut"], "source": str(payload.get("source", "preview")), "at": time.time()}
+        try:
+            pose = _job_pose(payload.get("pose"))
+        except ValueError as e:
+            return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
+        _job = {"project": payload["project"], "cut": payload["cut"], "source": str(payload.get("source", "preview")), "pose": pose, "at": time.time()}
         return {"ok": True}
 
     @app.post("/polaris-studio/job/clear")

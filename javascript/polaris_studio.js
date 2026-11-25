@@ -314,6 +314,8 @@
     let fsDialogSave = null;
     let fsPendingNext = null;       // 未保存の確認の後に進む先
     let fsPendingSave = null;       // 差分の確認の後に進む先
+    let fsPose = null;              // 編集中のポーズ（OpenPose の JSON、座標は 0〜1）。ないときは null
+    let fsPoseControl = null;       // 編集中の、ポーズを ControlNet に入れるときの設定
 
     function fq(sel) {
         return fs.querySelector(sel);
@@ -344,6 +346,7 @@
                     <label class="mtm-fs-param" title="このカット案の「生成」の Variation strength（0〜1）">Var<input type="number" class="mtm-fs-var" min="0" max="1" step="0.01"></label>
                     <div class="mtm-fs-progress mtm-hidden"></div>
                     <span class="mtm-fs-spacer"></span>
+                    <button type="button" class="mtm-btn mtm-fs-pose" title="このカット案のポーズ（OpenPose）を編集します。「使う」にすると、「生成」とキューで ControlNet に入れます">ポーズ</button>
                     <button type="button" class="mtm-btn mtm-fs-dict ps-off" title="拡張機能「プロンプト大辞典」を右に出します。「挿入」は、最後にカーソルを置いたプロンプト欄（ポジティブかネガティブ）のカーソル位置に入ります">📖 大辞典</button>
                     <button type="button" class="mtm-btn mtm-fs-queues" title="プロジェクト全体のキューを管理（編集中の内容はそのまま）">▶ キュー管理</button>
                 </div>
@@ -476,6 +479,7 @@
         fq(".mtm-fs-queue").addEventListener("click", () => leaveEditor(() => editor.onQueue(editor.cut)));
         // キュー管理はカット案の内容を使わないので、保存の確認なしで開く
         fq(".mtm-fs-queues").addEventListener("click", (e) => editor.onQueues(e.currentTarget));
+        fq(".mtm-fs-pose").addEventListener("click", openPose);
         fq(".mtm-fs-dict").addEventListener("click", () => (dictHome ? closeDict() : openDict()));
         fq(".ps-ed-dict-close").addEventListener("click", closeDict);
         // 大辞典の「挿入」は、WebUI の prompt 欄ではなく編集画面のプロンプト欄に入れる（大辞典の処理より先に受け取って止める）
@@ -716,6 +720,7 @@
     }
 
     function closeEditor() {
+        if (window.PolarisPose) window.PolarisPose.close();
         closeDict(false);
         closeDialog();
         closeCategoryDialog();
@@ -744,6 +749,53 @@
         fq(".mtm-fs-seed").value = cut.seed;
         fq(".mtm-fs-subseed").value = cut.subseed;
         fq(".mtm-fs-var").value = cut.subseedStrength;
+        fsPose = cut.pose ? JSON.parse(JSON.stringify(cut.pose)) : null;
+        fsPoseControl = {...window.PolarisPose.DEFAULT_CONTROL, ...(cut.poseControl || {})};
+        renderPoseButton();
+    }
+
+    // ---------- ポーズ（polaris_pose.js） ----------
+
+    function renderPoseButton() {
+        const btn = fq(".mtm-fs-pose");
+        const has = !!(fsPose && fsPose.people && fsPose.people.length);
+        const on = has && fsPoseControl.use;
+        btn.textContent = on ? "ポーズ（使う）" : has ? "ポーズ（使わない）" : "ポーズ";
+        btn.classList.toggle("mtm-active", on);
+    }
+
+    function poseDirty() {
+        const saved = editor.cut.pose || null;
+        const savedControl = {...window.PolarisPose.DEFAULT_CONTROL, ...(editor.cut.poseControl || {})};
+        return JSON.stringify(fsPose) !== JSON.stringify(saved) || JSON.stringify(fsPoseControl) !== JSON.stringify(savedControl);
+    }
+
+    function openPose() {
+        const p = readParams();
+        // カット案のサイズが決まっていなければ、WebUI の幅・高さで始める
+        const webui = (name) => Number((webuiSlider(name, "txt2img") || {}).number?.value) || 0;
+        const size = p.width && p.height ? {width: p.width, height: p.height} : {width: webui("width") || 512, height: webui("height") || 768};
+        const images = editor.images();
+        const picked = images.find((x) => thumbSel.has(x.name));
+        const key = editor.keyImage();
+        window.PolarisPose.open({
+            pose: fsPose,
+            control: fsPoseControl,
+            size,
+            images,
+            imageUrl: editor.imageUrl,
+            preferred: (picked || key || {}).name || "",
+            onApply(pose, control) {
+                fsPose = pose;
+                fsPoseControl = control;
+                renderPoseButton();
+                updateDirty();
+                fs.focus();
+            },
+            onCancel() {
+                fs.focus();
+            },
+        });
     }
 
     // アコーディオンの開閉はプロジェクトごとにブラウザに覚えておく。初めて開くときは、追加済みのタグがあるカテゴリを開く
@@ -831,7 +883,7 @@
     }
 
     function fsDirty() {
-        return textDirty() || picksDirty() || paramsDirty();
+        return textDirty() || picksDirty() || paramsDirty() || poseDirty();
     }
 
     function updateDirty() {
@@ -893,6 +945,8 @@
         const cut = editor.cut;
         Object.assign(cut, readParams());
         cut.picks = [...fsPicks];
+        cut.pose = fsPose ? JSON.parse(JSON.stringify(fsPose)) : null;
+        cut.poseControl = {...fsPoseControl};
         changePrompt(cut, posArea().value, negArea().value);
         loadEditorState();
         renderEditor();
@@ -1561,9 +1615,11 @@
             writeWebuiValue("width", job.width, tab);
             writeWebuiValue("height", job.height, tab);
         }
+        // ポーズを使うときは、ポーズの絵と ControlNet の設定を一緒に渡す（ユニットに入れるのは Python 側）
+        const pose = job.pose && window.PolarisPose ? await window.PolarisPose.jobPayload(job.pose) : null;
         // 書き込んだ値を Gradio が拾ってから生成する
         await sleep(300);
-        await postJob("polaris-studio/job", {project: job.project, cut: job.cut, source: job.source});
+        await postJob("polaris-studio/job", {project: job.project, cut: job.cut, source: job.source, pose});
         try {
             await generateAndWait(tab);
         } finally {

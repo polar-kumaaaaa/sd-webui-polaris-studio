@@ -3718,3 +3718,167 @@ body.mtm-fs-open {
     color: #e0a000;
     font-weight: 600;
 }
+
+/* ---------- ポーズ（OpenPose）の編集（polaris_pose.js） ---------- */
+
+#mtm-fs .ps-pose {
+    position: absolute;
+    inset: 16px;
+    z-index: 60;
+    display: flex;
+    flex-direction: column;
+    border: 1px solid var(--border-color-primary);
+    border-radius: 10px;
+    background: var(--background-fill-primary);
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
+    overflow: hidden;
+    isolation: isolate;
+    outline: none;
+}
+
+#mtm-fs .ps-pose.ps-off {
+    display: none;
+}
+
+.ps-pose-bar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border-color-primary);
+}
+
+.ps-pose-title {
+    margin-right: 8px;
+    font-size: 16px;
+    font-weight: 600;
+}
+
+.ps-pose-sep {
+    width: 1px;
+    height: 20px;
+    margin: 0 4px;
+    background: var(--border-color-primary);
+}
+
+.ps-pose-busy {
+    color: var(--body-text-color-subdued);
+    font-size: 13px;
+}
+
+.ps-pose-bar button:disabled,
+.ps-pose-side button:disabled {
+    opacity: 0.45;
+    cursor: default;
+}
+
+.ps-pose-main {
+    flex: 1;
+    display: flex;
+    min-height: 0;
+}
+
+.ps-pose-stage {
+    position: relative;
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    background: repeating-conic-gradient(#2a2a2a 0% 25%, #222 0% 50%) 50% / 24px 24px;
+}
+
+.ps-pose-canvas {
+    position: absolute;
+    inset: 0;
+    display: block;
+    touch-action: none;
+}
+
+.ps-pose-status {
+    position: absolute;
+    left: 12px;
+    bottom: 12px;
+    padding: 4px 10px;
+    border-radius: 6px;
+    background: rgba(0, 0, 0, 0.7);
+    color: #fff;
+    font-size: 13px;
+    pointer-events: none;
+}
+
+.ps-pose-side {
+    flex: none;
+    width: 290px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    padding: 12px 14px;
+    border-left: 1px solid var(--border-color-primary);
+    overflow-y: auto;
+    font-size: 13px;
+}
+
+.ps-pose-side section {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.ps-pose-head {
+    font-weight: 600;
+}
+
+.ps-pose-row {
+    display: flex;
+    gap: 6px;
+}
+
+.ps-pose-check {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.ps-pose-field,
+.ps-pose-range {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.ps-pose-field > select,
+.ps-pose-field > input,
+.ps-pose-range > input,
+.ps-pose-side > section > select {
+    flex: 1;
+    min-width: 0;
+}
+
+.ps-pose-field > input[type=number] {
+    max-width: 90px;
+    flex: none;
+}
+
+.ps-pose-side select,
+.ps-pose-side input[type=number] {
+    padding: 3px 6px;
+    border: 1px solid var(--border-color-primary);
+    border-radius: 6px;
+    background: var(--background-fill-secondary);
+    color: var(--body-text-color);
+}
+
+.ps-pose-note,
+.ps-pose-help {
+    color: var(--body-text-color-subdued);
+    font-size: 12px;
+    line-height: 1.5;
+}
+
+.ps-pose-help > div:not(.ps-pose-head) {
+    padding-left: 2px;
+}
+
+.ps-pose-help .ps-pose-head {
+    color: var(--body-text-color);
+}
