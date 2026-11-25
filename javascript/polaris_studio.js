@@ -479,7 +479,7 @@
         fq(".mtm-fs-queue").addEventListener("click", () => leaveEditor(() => editor.onQueue(editor.cut)));
         // キュー管理はカット案の内容を使わないので、保存の確認なしで開く
         fq(".mtm-fs-queues").addEventListener("click", (e) => editor.onQueues(e.currentTarget));
-        fq(".mtm-fs-pose").addEventListener("click", openPose);
+        fq(".mtm-fs-pose").addEventListener("click", () => openPose());
         fq(".mtm-fs-dict").addEventListener("click", () => (dictHome ? closeDict() : openDict()));
         fq(".ps-ed-dict-close").addEventListener("click", closeDict);
         // 大辞典の「挿入」は、WebUI の prompt 欄ではなく編集画面のプロンプト欄に入れる（大辞典の処理より先に受け取って止める）
@@ -770,7 +770,9 @@
         return JSON.stringify(fsPose) !== JSON.stringify(saved) || JSON.stringify(fsPoseControl) !== JSON.stringify(savedControl);
     }
 
-    function openPose() {
+    // source: 最初に選んでおく取り出し元の画像の名前。detect が真なら、開いてすぐにその画像から取り出す（ビューワーの「ポーズを抽出」）
+    function openPose({source = "", detect = false} = {}) {
+        if (!editor) return;
         const p = readParams();
         // カット案のサイズが決まっていなければ、WebUI の幅・高さで始める
         const webui = (name) => Number((webuiSlider(name, "txt2img") || {}).number?.value) || 0;
@@ -784,7 +786,9 @@
             size,
             images,
             imageUrl: editor.imageUrl,
-            preferred: (picked || key || {}).name || "",
+            thumbUrl: editor.thumbUrl,
+            preferred: source || (picked || key || {}).name || "",
+            detect: detect && !!source,
             onApply(pose, control) {
                 fsPose = pose;
                 fsPoseControl = control;
@@ -1813,6 +1817,8 @@
         isEditing(cut) {
             return !!editor && editor.cut === cut;
         },
+        // 編集中のカット案のポーズの画面を開く。{source: 画像の名前, detect: 開いてすぐ取り出すか}
+        openPose,
         // 上段のサムネイルの選択（ビューワーの S キーで使う）
         thumbSelected(name) {
             return thumbSel.has(name);

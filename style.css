@@ -3848,8 +3848,7 @@ body.mtm-fs-open {
 
 .ps-pose-field > select,
 .ps-pose-field > input,
-.ps-pose-range > input,
-.ps-pose-side > section > select {
+.ps-pose-range > input {
     flex: 1;
     min-width: 0;
 }
@@ -3881,4 +3880,82 @@ body.mtm-fs-open {
 
 .ps-pose-help .ps-pose-head {
     color: var(--body-text-color);
+}
+
+/* 下敷き・取り出し元のサムネイル */
+.ps-pose-sources {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(56px, 1fr));
+    gap: 6px;
+    max-height: 240px;
+    padding: 2px;
+    overflow-y: auto;
+}
+
+.ps-pose-src {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    aspect-ratio: 1;
+    padding: 0;
+    border: 2px solid transparent;
+    border-radius: 6px;
+    background: var(--background-fill-secondary);
+    color: var(--body-text-color-subdued);
+    font-size: 11px;
+    cursor: pointer;
+    overflow: hidden;
+}
+
+.ps-pose-src img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.ps-pose-src span {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    padding: 1px 2px;
+    background: rgba(0, 0, 0, 0.55);
+    color: #fff;
+    text-align: center;
+}
+
+.ps-pose-src:first-child span {
+    position: static;
+    background: none;
+    color: inherit;
+}
+
+.ps-pose-src:hover {
+    border-color: var(--border-color-primary);
+}
+
+.ps-pose-src.ps-selected {
+    border-color: var(--color-accent);
+}
+
+/* 外から画像をドラッグしている間の案内 */
+#mtm-fs .ps-pose-drop {
+    position: absolute;
+    inset: 0;
+    z-index: 5;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 3px dashed var(--color-accent);
+    border-radius: 10px;
+    background: rgba(0, 0, 0, 0.55);
+    color: #fff;
+    font-size: 18px;
+    font-weight: 600;
+    pointer-events: none;
+}
+
+#mtm-fs .ps-pose-drop.ps-off {
+    display: none;
 }

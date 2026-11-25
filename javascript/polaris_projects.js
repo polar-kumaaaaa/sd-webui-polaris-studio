@@ -294,6 +294,7 @@
                     <button type="button" class="mtm-btn ps-view-restore" title="この画像の生成情報のプロンプトをカット案に戻す">プロンプトを戻す</button>
                     <button type="button" class="mtm-btn ps-view-img2img" title="WebUI の img2img に送る。生成した画像はこのカット案に保存される">img2img に送る</button>
                     <button type="button" class="mtm-btn ps-view-i2i" title="WebUI のインペイントに送る。生成した画像はこのカット案に保存される">インペイントに送る</button>
+                    <button type="button" class="mtm-btn ps-view-pose" title="この画像からポーズを取り出し、カット案のポーズの画面を開く（カット案に入るのは、編集画面で「保存」したとき）">ポーズを抽出</button>
                     <button type="button" class="mtm-btn ps-view-select" title="この画像を一覧の選択に加える・外す (S)。一覧に戻って、まとめて削除や再生成ができます">☐ 選択</button>
                     <button type="button" class="mtm-btn mtm-danger ps-view-delete" title="この画像を削除 (D)。確認が出ます（Enter で削除）">削除</button>
                     <button type="button" class="mtm-btn ps-view-info">情報</button>
@@ -413,6 +414,7 @@
         q(".ps-view-key").addEventListener("click", () => setKeyImage(viewCut, viewImage.name));
         q(".ps-view-restore").addEventListener("click", restorePromptFromImage);
         q(".ps-view-img2img").addEventListener("click", () => sendToImg2img("img2img"));
+        q(".ps-view-pose").addEventListener("click", extractPoseFromViewer);
         q(".ps-view-i2i").addEventListener("click", () => sendToImg2img("inpaint"));
         q(".ps-view-delete").addEventListener("click", () => askDeleteImages([selKey(viewCut, viewImage.name)], "画像を削除"));
         q(".ps-view-select").addEventListener("click", toggleViewSelect);
@@ -2630,6 +2632,16 @@
         q(".ps-gallery-source").value = "";
         q(".ps-gallery-fav").checked = false;
         openViewer(image, cut, true);
+    }
+
+    // ビューワーの「ポーズを抽出」。そのカット案の編集画面（閉じていれば開く）の上にポーズの画面を開き、この画像から取り出す
+    function extractPoseFromViewer() {
+        if (!viewImage || !viewCut) return;
+        const cut = viewCut;
+        const name = viewImage.name;
+        hide(".ps-viewer");
+        if (!window.PolarisStudio.isEditing(cut)) openEditor(cut);
+        window.PolarisStudio.openPose({source: name, detect: true});
     }
 
     // ビューワーの「選択」。編集画面の上段から開いたときは上段のサムネイルの選択、ほかはサムネイル一覧の選択に加える

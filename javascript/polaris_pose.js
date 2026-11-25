@@ -360,7 +360,8 @@
     let viewAuto = true;            // 拡大・移動するまでは、画面の大きさが変わるたびに全体を表示し直す
     let show = {hands: true, face: true, underlay: 0.5};
     let underlay = null;            // 下敷きの画像 {img, name}
-    let localImage = null;          // 読み込んだファイル {blob, url}
+    let localImage = null;          // 読み込んだファイル（ファイルから選んだか、外からドロップした画像） {blob, url, name}
+    let sourceValue = "";           // 下敷き・取り出し元。"" はなし、"::file" は読み込んだファイル、ほかはカット案の画像の名前
     let drag = null;
     let spaceDown = false;
     let busy = false;
@@ -422,7 +423,8 @@
                     </section>
                     <section>
                         <div class="ps-pose-head">下敷き・取り出し元</div>
-                        <select class="ps-pose-source"></select>
+                        <div class="ps-pose-note">クリックで選び、ダブルクリックでそのまま取り出します。ブラウザの外から画像をドロップしても取り出せます</div>
+                        <div class="ps-pose-sources"></div>
                         <button type="button" class="mtm-btn ps-pose-file">ファイルから…</button>
                         <label class="ps-pose-range">濃さ<input type="range" class="ps-pose-opacity" min="0" max="1" step="0.05"></label>
                     </section>
@@ -451,6 +453,7 @@
                     </section>
                 </div>
             </div>
+            <div class="ps-pose-drop ps-off">ここに画像をドロップすると、ポーズを取り出します</div>
             <input type="file" class="ps-pose-file-input" accept="image/*" hidden>
             <input type="file" class="ps-pose-json-input" accept=".json,application/json" hidden>
         `;
@@ -509,16 +512,46 @@
             saveView();
             draw();
         });
-        q(".ps-pose-source").addEventListener("change", loadUnderlay);
         q(".ps-pose-file").addEventListener("click", () => q(".ps-pose-file-input").click());
         q(".ps-pose-file-input").addEventListener("change", (e) => {
             const file = e.target.files[0];
             e.target.value = "";
-            if (!file) return;
-            if (localImage) URL.revokeObjectURL(localImage.url);
-            localImage = {blob: file, url: URL.createObjectURL(file), name: file.name};
-            fillSources("::file");
-            loadUnderlay();
+            if (file) useFile(file, false);
+        });
+        // ブラウザの外から画像をドロップしたら、それを取り出し元にして取り出す。編集画面や WebUI のドロップの処理には渡さない
+        let dragDepth = 0;
+        const hasFiles = (e) => [...(e.dataTransfer ? e.dataTransfer.types : [])].includes("Files");
+        root.addEventListener("dragenter", (e) => {
+            if (!hasFiles(e)) return;
+            e.preventDefault();
+            e.stopPropagation();
+            dragDepth++;
+            q(".ps-pose-drop").classList.remove("ps-off");
+        });
+        root.addEventListener("dragover", (e) => {
+            if (!hasFiles(e)) return;
+            e.preventDefault();
+            e.stopPropagation();
+            e.dataTransfer.dropEffect = "copy";
+        });
+        root.addEventListener("dragleave", (e) => {
+            if (!hasFiles(e)) return;
+            e.stopPropagation();
+            dragDepth = Math.max(0, dragDepth - 1);
+            if (!dragDepth) q(".ps-pose-drop").classList.add("ps-off");
+        });
+        root.addEventListener("drop", (e) => {
+            if (!hasFiles(e)) return;
+            e.preventDefault();
+            e.stopPropagation();
+            dragDepth = 0;
+            q(".ps-pose-drop").classList.add("ps-off");
+            const file = [...e.dataTransfer.files].find((f) => f.type.startsWith("image/"));
+            if (!file) {
+                alert("画像のファイルをドロップしてください。");
+                return;
+            }
+            useFile(file, true);
         });
         q(".ps-pose-models").addEventListener("click", () => fillModels(true));
         for (const sel of [".ps-pose-use", ".ps-pose-unit", ".ps-pose-model", ".ps-pose-weight", ".ps-pose-start", ".ps-pose-end", ".ps-pose-mode"]) {
@@ -543,7 +576,17 @@
         } catch (e) { /* 覚えられなくても表示は変えられる */ }
     }
 
-    // options: {pose, control, size: {width, height}, images, imageUrl(image), preferred, onApply(pose, control)}
+    // 読み込んだファイルを取り出し元にする。detectNow が真なら、そのままポーズを取り出す
+    function useFile(file, detectNow) {
+        if (localImage) URL.revokeObjectURL(localImage.url);
+        localImage = {blob: file, url: URL.createObjectURL(file), name: file.name};
+        fillSources("::file");
+        loadUnderlay();
+        if (detectNow) detectFromSource();
+    }
+
+    // options: {pose, control, size: {width, height}, images, imageUrl(image), thumbUrl(image), preferred, detect, onApply(pose, control), onCancel}
+    // preferred は最初に選んでおく取り出し元の画像の名前。detect が真なら、開いてすぐにその画像から取り出す
     function open(options) {
         if (!root) build();
         opts = options;
@@ -570,13 +613,16 @@
         q(".ps-pose-mode").value = control.mode;
         fillModels(false);
         const images = options.images || [];
-        const preferred = model.source && images.some((x) => x.name === model.source) ? model.source : options.preferred || "";
+        // 取り出すために開いたときは、その画像を選ぶ。ほかは、前に取り出した画像があればそれを下敷きにする
+        const preferred = options.detect && options.preferred ? options.preferred
+            : model.source && images.some((x) => x.name === model.source) ? model.source : options.preferred || "";
         fillSources(preferred);
         root.classList.remove("ps-off");
         fit();
         loadUnderlay();
         updateUi();
         root.focus();
+        if (options.detect) detectFromSource();
     }
 
     function isOpen() {
@@ -610,18 +656,54 @@
         sel.value = current;
     }
 
+    // 取り出し元をサムネイルで並べる（新しい画像が先）。value がなければ、いちばん新しい画像を選ぶ
     function fillSources(value) {
-        const sel = q(".ps-pose-source");
-        sel.textContent = "";
-        sel.appendChild(new Option("なし", ""));
-        if (localImage) sel.appendChild(new Option("読み込んだ画像: " + localImage.name, "::file"));
+        const box = q(".ps-pose-sources");
+        box.textContent = "";
         const images = (opts && opts.images) || [];
-        for (const image of [...images].reverse()) sel.appendChild(new Option(image.name, image.name));
-        sel.value = [...sel.options].some((o) => o.value === value) ? value : images.length ? images[images.length - 1].name : "";
+        const values = ["", ...(localImage ? ["::file"] : []), ...images.map((x) => x.name)];
+        sourceValue = values.includes(value) ? value : images.length ? images[images.length - 1].name : "";
+        const tile = (v, title, src, label) => {
+            const t = document.createElement("button");
+            t.type = "button";
+            t.className = "ps-pose-src" + (v === sourceValue ? " ps-selected" : "");
+            t.dataset.value = v;
+            t.title = title;
+            if (src) {
+                const img = document.createElement("img");
+                img.src = src;
+                img.alt = "";
+                img.loading = "lazy";
+                img.draggable = false;
+                t.appendChild(img);
+            }
+            if (label) {
+                const span = document.createElement("span");
+                span.textContent = label;
+                t.appendChild(span);
+            }
+            t.addEventListener("click", () => selectSource(v));
+            t.addEventListener("dblclick", () => {
+                selectSource(v);
+                if (v) detectFromSource();
+            });
+            box.appendChild(t);
+        };
+        tile("", "下敷きなし", null, "なし");
+        if (localImage) tile("::file", "読み込んだ画像: " + localImage.name, localImage.url, "ファイル");
+        const thumb = opts && opts.thumbUrl ? opts.thumbUrl : opts && opts.imageUrl;
+        for (const image of [...images].reverse()) tile(image.name, image.name, thumb ? thumb(image) : null, "");
+    }
+
+    function selectSource(v) {
+        if (v === sourceValue) return;
+        sourceValue = v;
+        for (const t of q(".ps-pose-sources").children) t.classList.toggle("ps-selected", t.dataset.value === v);
+        loadUnderlay();
     }
 
     function sourceBlobUrl() {
-        const v = q(".ps-pose-source").value;
+        const v = sourceValue;
         if (!v) return null;
         if (v === "::file") return localImage ? localImage.url : null;
         const image = (opts.images || []).find((x) => x.name === v);
@@ -647,7 +729,7 @@
         if (busy) return;
         const url = sourceBlobUrl();
         if (!url) {
-            alert("「下敷き・取り出し元」で画像を選んでください。");
+            alert("「下敷き・取り出し元」で画像を選ぶか、画像をドロップしてください。");
             return;
         }
         if (model.people.length && !confirm("今のポーズを、取り出したポーズに置き換えます。よろしいですか？（元に戻すこともできます）")) return;
@@ -660,7 +742,7 @@
                 alert("人が見つかりませんでした。");
                 return;
             }
-            const v = q(".ps-pose-source").value;
+            const v = sourceValue;
             edit(() => {
                 model.width = next.width;
                 model.height = next.height;
