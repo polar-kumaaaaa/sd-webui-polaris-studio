@@ -1819,6 +1819,20 @@
         },
         // 編集中のカット案のポーズの画面を開く。{source: 画像の名前, detect: 開いてすぐ取り出すか}
         openPose,
+        // 編集画面を閉じてから next を行う（Alt+B で Book に移るとき）。保存していない変更があれば確認を出す。
+        // 編集画面の上にダイアログやポーズの画面を出している間は何もせず false を返す
+        leaveEditorTo(next) {
+            if (!editor) return false;
+            const open = (sel) => !fq(sel).classList.contains("ps-off");
+            if (!fq(".mtm-tdialog").classList.contains("mtm-hidden") || !fq(".mtm-cdialog").classList.contains("mtm-hidden")
+                || open(".ps-diff-dialog") || open(".ps-confirm-dialog") || open(".ps-history-dialog")
+                || (window.PolarisPose && window.PolarisPose.isOpen())) return false;
+            leaveEditor(() => {
+                closeEditor();
+                next();
+            });
+            return true;
+        },
         // 上段のサムネイルの選択（ビューワーの S キーで使う）
         thumbSelected(name) {
             return thumbSel.has(name);

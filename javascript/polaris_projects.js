@@ -529,11 +529,19 @@
     }
 
     // Alt+B：プロジェクトの画面から Book を開き、Book の画面（コマページの編集中も）からはプロジェクトの画面に戻る。
-    // ダイアログやビューワーなどを開いている間と、プロンプト編集の間は何もしない
+    // プロンプト編集（カット案の編集画面）からは、編集画面を閉じて Book を開く（保存していない変更があれば確認を出す）。
+    // ダイアログやビューワーなどを開いている間は何もしない
     function toggleBooksByKey(e) {
-        if (root.classList.contains("ps-off")) return;
         const blocking = [".ps-delete-dialog", ".ps-viewer", ".ps-queues-view", ".ps-new-dialog", ".ps-cover-dialog", ".ps-key-dialog"].some(isOpen);
         if (blocking) return;
+        if (root.classList.contains("ps-off")) {
+            if (!project || fs.classList.contains("mtm-hidden")) return;
+            if (window.PolarisStudio.leaveEditorTo(openBooks)) {
+                e.preventDefault();
+                e.stopPropagation();
+            }
+            return;
+        }
         if (isOpen(".ps-books-view")) {
             if (window.PolarisPages.busy()) return;
             e.preventDefault();

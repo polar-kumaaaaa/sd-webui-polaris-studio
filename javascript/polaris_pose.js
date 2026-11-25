@@ -25,6 +25,22 @@
 
     const MODES = [["BALANCED", "バランス"], ["PROMPT", "プロンプトを重視"], ["CONTROL", "ControlNet を重視"]];
     const DEFAULT_CONTROL = {use: false, unit: 0, model: "", weight: 1, start: 0, end: 1, mode: "BALANCED"};
+    // 体の点をダブルクリックしたときに、そこから体の外に向けてまとめて選ぶ点（hand はその側の手、face は顔も選ぶ）
+    const CHAINS = {
+        0: {body: [0, 14, 15, 16, 17], face: true},           // 鼻：目・耳と顔
+        1: {body: "all", face: true},                          // 首：体全体と顔（手は別）
+        2: {body: [2, 3, 4], hand: "right"},                   // 右肩：右腕と右手
+        3: {body: [3, 4], hand: "right"},
+        4: {body: [4], hand: "right"},
+        5: {body: [5, 6, 7], hand: "left"},
+        6: {body: [6, 7], hand: "left"},
+        7: {body: [7], hand: "left"},
+        8: {body: [8, 9, 10]}, 9: {body: [9, 10]}, 10: {body: [10]},
+        11: {body: [11, 12, 13]}, 12: {body: [12, 13]}, 13: {body: [13]},
+        14: {body: [14, 16]}, 15: {body: [15, 17]}, 16: {body: [16]}, 17: {body: [17]},
+    };
+    const HAND_WRIST = {right: 4, left: 7};  // 手と同じ側の体の手首
+    const KNOB = 7;                 // 手を回すつまみの半径（画面の px）
     const HIT = 9;                  // 点をつかめる距離（画面の px）
     const UNDO_MAX = 100;
     const VIEW_KEY = "polaris-studio:pose-view";
@@ -416,6 +432,15 @@
                         </div>
                     </section>
                     <section>
+                        <div class="ps-pose-head">手</div>
+                        <div class="ps-pose-note">手の点か体の手首を選ぶと、その手を手首を中心に動かせます。手首から出る白い丸をドラッグすると回ります（Shift で 15° ずつ）</div>
+                        <div class="ps-pose-row">
+                            <button type="button" class="mtm-btn ps-pose-flip" title="手のひらの表と裏を入れ替えます。手首と中指の付け根を結ぶ線で裏返すので、親指が反対側に移ります (H)">反転</button>
+                            <button type="button" class="mtm-btn ps-pose-rotl" title="手首を中心に左へ 15° 回します (Q、Shift+Q で 1°)">⟲ 15°</button>
+                            <button type="button" class="mtm-btn ps-pose-rotr" title="手首を中心に右へ 15° 回します (E、Shift+E で 1°)">⟳ 15°</button>
+                        </div>
+                    </section>
+                    <section>
                         <div class="ps-pose-head">表示</div>
                         <label class="ps-pose-check"><input type="checkbox" class="ps-pose-show-hands" checked>手</label>
                         <label class="ps-pose-check"><input type="checkbox" class="ps-pose-show-face" checked>顔</label>
@@ -444,7 +469,8 @@
                         <div>点をドラッグ：動かす（選んだ点はまとめて）</div>
                         <div>何もない所をドラッグ：囲んで選ぶ</div>
                         <div>Shift+クリック：選ぶ点を足す・外す</div>
-                        <div>点をダブルクリック：その部位（体・手・顔）を全部選ぶ</div>
+                        <div>点をダブルクリック：そこから先をまとめて選ぶ（肩なら腕と手、鼻なら目・耳・顔、首なら手のほかの全部。手首なら手全体、顔の点なら顔全体）</div>
+                        <div>H：手の反転／Q・E：手を回す</div>
                         <div>ホイール：拡大・縮小</div>
                         <div>右ドラッグ・中ドラッグ・Space+ドラッグ：動かして見る</div>
                         <div>矢印キー：1px 動かす（Shift で 10px）</div>
@@ -491,6 +517,9 @@
         q(".ps-pose-json-input").addEventListener("change", importJson);
         q(".ps-pose-cancel").addEventListener("click", cancel);
         q(".ps-pose-ok").addEventListener("click", apply);
+        q(".ps-pose-flip").addEventListener("click", flipHands);
+        q(".ps-pose-rotl").addEventListener("click", () => rotateHands(-15));
+        q(".ps-pose-rotr").addEventListener("click", () => rotateHands(15));
         q(".ps-pose-hide").addEventListener("click", () => setVisible(false));
         q(".ps-pose-unhide").addEventListener("click", () => setVisible(true));
         q(".ps-pose-fit").addEventListener("click", () => {
@@ -821,6 +850,104 @@
         edit(() => keys.forEach((k) => (pointOf(k).v = v)));
     }
 
+    // ---------- 手の反転と回転 ----------
+
+    // 対象の手：選んでいる手の点か、体の手首がある手 [{pi, side}]
+    function targetHands() {
+        const found = new Map();
+        for (const k of selected) {
+            const {pi, part, i} = parseKey(k);
+            let side = null;
+            if (part === "left" || part === "right") side = part;
+            else if (part === "body") side = Object.keys(HAND_WRIST).find((s) => HAND_WRIST[s] === i) || null;
+            const person = model.people[pi];
+            if (side && person && person[side]) found.set(`${pi}:${side}`, {pi, side});
+        }
+        return [...found.values()];
+    }
+
+    // 点を、中心 c のまわりに角度 a（ラジアン）回す
+    function rotatePoint(p, c, a) {
+        const dx = p.x - c.x;
+        const dy = p.y - c.y;
+        const cos = Math.cos(a);
+        const sin = Math.sin(a);
+        p.x = c.x + dx * cos - dy * sin;
+        p.y = c.y + dx * sin + dy * cos;
+    }
+
+    function flipHands() {
+        const hands = targetHands();
+        if (!hands.length) {
+            status("手の点か、体の手首を選んでください");
+            return;
+        }
+        edit(() => {
+            for (const {pi, side} of hands) {
+                const pts = model.people[pi][side];
+                const c = pts[0];
+                let ax = pts[9].x - c.x;
+                let ay = pts[9].y - c.y;
+                const len = Math.hypot(ax, ay);
+                if (len < 1e-6) continue;
+                ax /= len;
+                ay /= len;
+                // 手首と中指の付け根を結ぶ線で裏返す
+                for (const p of pts.slice(1)) {
+                    const dx = p.x - c.x;
+                    const dy = p.y - c.y;
+                    const t = dx * ax + dy * ay;
+                    p.x = c.x + 2 * t * ax - dx;
+                    p.y = c.y + 2 * t * ay - dy;
+                }
+            }
+        });
+        status(hands.length > 1 ? `${hands.length} つの手を反転しました` : "手を反転しました");
+    }
+
+    function rotateHands(deg) {
+        const hands = targetHands();
+        if (!hands.length) {
+            status("手の点か、体の手首を選んでください");
+            return;
+        }
+        edit(() => {
+            for (const {pi, side} of hands) {
+                const pts = model.people[pi][side];
+                pts.slice(1).forEach((p) => rotatePoint(p, pts[0], deg * Math.PI / 180));
+            }
+        });
+    }
+
+    // 手を回すつまみ（画面の座標）。手首から中指の付け根の向きに、手の外側へ出す
+    function handKnobs() {
+        if (!show.hands || !model) return [];
+        return targetHands().map(({pi, side}) => {
+            const pts = model.people[pi][side];
+            const c = toScreen(pts[0]);
+            const m = toScreen(pts[9]);
+            let dx = m.x - c.x;
+            let dy = m.y - c.y;
+            const len = Math.hypot(dx, dy);
+            if (len < 1e-6) {
+                dx = 0;
+                dy = -1;
+            } else {
+                dx /= len;
+                dy /= len;
+            }
+            const r = Math.max(30, ...pts.map((p) => {
+                const s = toScreen(p);
+                return Math.hypot(s.x - c.x, s.y - c.y);
+            })) + 22;
+            return {pi, side, c, x: c.x + dx * r, y: c.y + dy * r};
+        });
+    }
+
+    function knobAt(sx, sy) {
+        return handKnobs().find((k) => Math.hypot(k.x - sx, k.y - sy) <= KNOB + 3) || null;
+    }
+
     function selectedPeople() {
         return [...new Set([...selected].map((k) => parseKey(k).pi))].sort((a, b) => a - b);
     }
@@ -1008,6 +1135,23 @@
             ctx.stroke();
             ctx.lineWidth = 1;
         });
+        for (const k of handKnobs()) {
+            ctx.strokeStyle = "rgba(255,255,255,0.7)";
+            ctx.setLineDash([3, 3]);
+            ctx.beginPath();
+            ctx.moveTo(k.c.x, k.c.y);
+            ctx.lineTo(k.x, k.y);
+            ctx.stroke();
+            ctx.setLineDash([]);
+            ctx.fillStyle = drag && drag.type === "rotate" && drag.pi === k.pi && drag.side === k.side ? "#9cf" : "#fff";
+            ctx.strokeStyle = "#000";
+            ctx.lineWidth = 1.5;
+            ctx.beginPath();
+            ctx.arc(k.x, k.y, KNOB, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.stroke();
+            ctx.lineWidth = 1;
+        }
         if (drag && drag.type === "box") {
             const x = Math.min(drag.sx, drag.cx);
             const y = Math.min(drag.sy, drag.cy);
@@ -1057,6 +1201,10 @@
         }
         q(".ps-pose-undo").disabled = !undoStack.length;
         q(".ps-pose-redo").disabled = !redoStack.length;
+        const noHand = !targetHands().length;
+        q(".ps-pose-flip").disabled = noHand;
+        q(".ps-pose-rotl").disabled = noHand;
+        q(".ps-pose-rotr").disabled = noHand;
         q(".ps-pose-hide").disabled = !selected.size;
         q(".ps-pose-unhide").disabled = !selected.size;
         q(".ps-pose-export").disabled = !model.people.length;
@@ -1095,6 +1243,14 @@
             return;
         }
         if (e.button !== 0) return;
+        const knob = knobAt(x, y);
+        if (knob) {
+            const pts = model.people[knob.pi][knob.side];
+            drag = {type: "rotate", pi: knob.pi, side: knob.side, moved: false, a0: Math.atan2(y - knob.c.y, x - knob.c.x),
+                start: pts.map((p) => ({...p}))};
+            draw();
+            return;
+        }
         const hit = hitTest(x, y);
         if (hit) {
             if (e.shiftKey || e.ctrlKey || e.metaKey) {
@@ -1117,7 +1273,7 @@
     function pointerMove(e) {
         const {x, y} = localPos(e);
         if (!drag) {
-            canvasEl().style.cursor = spaceDown ? "grab" : hitTest(x, y) ? "pointer" : "crosshair";
+            canvasEl().style.cursor = spaceDown || knobAt(x, y) ? "grab" : hitTest(x, y) ? "pointer" : "crosshair";
             return;
         }
         if (drag.type === "pan") {
@@ -1137,6 +1293,24 @@
                 p.x = p0.x + dx;
                 p.y = p0.y + dy;
             }
+        } else if (drag.type === "rotate") {
+            const pts = model.people[drag.pi] && model.people[drag.pi][drag.side];
+            if (!pts) return;
+            const c = toScreen(drag.start[0]);
+            let a = Math.atan2(y - c.y, x - c.x) - drag.a0;
+            if (e.shiftKey) a = Math.round(a / (Math.PI / 12)) * (Math.PI / 12);
+            if (!drag.moved) {
+                if (Math.abs(a) < 1e-3) return;
+                pushUndo();
+                drag.moved = true;
+            }
+            pts.forEach((p, i) => {
+                p.x = drag.start[i].x;
+                p.y = drag.start[i].y;
+                if (i) rotatePoint(p, drag.start[0], a);
+            });
+            const deg = Math.round(a * 180 / Math.PI);
+            status(`${((deg % 360) + 540) % 360 - 180}°`);
         } else if (drag.type === "box") {
             drag.cx = x;
             drag.cy = y;
@@ -1176,12 +1350,54 @@
         draw();
     }
 
+    // 体の点はそこから体の外に向けて、手の点はそこから指先まで（手首なら手全体）、顔の点は顔全体を選ぶ
+    function chainKeys(pi, part, i) {
+        const person = model.people[pi];
+        const keys = [];
+        const addPart = (id, list) => {
+            const pts = person[id];
+            if (!pts) return;
+            if ((id === "left" || id === "right") && !show.hands) return;
+            if (id === "face" && !show.face) return;
+            (list || pts.map((_, j) => j)).forEach((j) => keys.push(keyOf(pi, id, j)));
+        };
+        if (part === "body") {
+            const c = CHAINS[i] || {body: [i]};
+            addPart("body", c.body === "all" ? null : c.body);
+            if (c.hand) addPart(c.hand);
+            if (c.face) addPart("face");
+        } else if (part === "left" || part === "right") {
+            if (i === 0) {
+                addPart(part);
+            } else {
+                const tip = Math.floor((i - 1) / 4) * 4 + 4;
+                const list = [];
+                for (let j = i; j <= tip; j++) list.push(j);
+                addPart(part, list);
+            }
+        } else {
+            addPart(part);
+        }
+        return keys;
+    }
+
     function doubleClick(e) {
         const {x, y} = localPos(e);
-        const hit = hitTest(x, y);
+        if (knobAt(x, y)) return;
+        // 鼻・目・手首は顔や手の点と重なりやすいので、届く範囲に体の点があればそれを、次に手の点を選ぶ
+        const near = {};
+        eachPoint((p, pi, part, i) => {
+            const s = toScreen(p);
+            const d = Math.hypot(s.x - x, s.y - y);
+            const group = part === "body" ? 0 : part === "face" ? 2 : 1;
+            if (d < HIT && (!near[group] || d < near[group].d)) near[group] = {d, k: keyOf(pi, part, i)};
+        });
+        const hit = (near[0] || near[1] || near[2] || {}).k;
         if (!hit) return;
-        const {pi, part} = parseKey(hit);
-        selectPart(pi, part);
+        const {pi, part, i} = parseKey(hit);
+        selected = new Set(chainKeys(pi, part, i));
+        updateUi();
+        draw();
     }
 
     function wheel(e) {
@@ -1228,6 +1444,11 @@
             draw();
         } else if (e.key === "Delete" || e.key === "Backspace") {
             setVisible(e.shiftKey);
+        } else if (e.key.toLowerCase() === "h" && !ctrl) {
+            flipHands();
+        } else if ((e.key.toLowerCase() === "q" || e.key.toLowerCase() === "e") && !ctrl) {
+            const step = e.shiftKey ? 1 : 15;
+            rotateHands(e.key.toLowerCase() === "q" ? -step : step);
         } else if (e.key.toLowerCase() === "f" && !ctrl) {
             fit();
             draw();
