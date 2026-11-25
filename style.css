@@ -943,15 +943,17 @@ body.mtm-fs-open {
     font-weight: 600;
 }
 
-/* 上段：このカット案の画像 */
+/* 上段：このカット案の画像。大きさと選択の見た目はサムネイル一覧（.ps-thumb）とそろえる */
 .ps-ed-thumbs {
+    position: relative;
     flex: none;
     display: flex;
     align-items: flex-start;
     gap: 8px;
-    min-height: 128px;
+    min-height: 187px;
     padding: 8px 14px 18px;
     border-bottom: 1px solid var(--border-color-primary);
+    user-select: none;
 }
 
 .ps-ed-thumbs-empty {
@@ -963,18 +965,20 @@ body.mtm-fs-open {
 .ps-ed-thumb {
     position: relative;
     flex: none;
-    width: 82px;
-    height: 110px;
+    width: 140px;
+    aspect-ratio: 3 / 4;
     padding: 0;
-    border: 1px solid var(--border-color-primary);
     border-radius: 6px;
     background: var(--background-fill-secondary);
+    color: #fff;
+    font-size: 11px;
     overflow: hidden;
     cursor: pointer;
 }
 
 .ps-ed-thumb:hover {
-    border-color: var(--color-accent);
+    outline: 1px solid var(--color-accent);
+    outline-offset: -1px;
 }
 
 .ps-ed-thumb img {
@@ -984,88 +988,23 @@ body.mtm-fs-open {
     display: block;
 }
 
-.ps-ed-thumb .ps-thumb-mark {
-    left: 3px;
-    top: 3px;
-    padding: 0 4px;
-    font-size: 10px;
+.ps-ed-thumb.ps-selected {
+    outline: 3px solid var(--color-accent);
+    outline-offset: -3px;
 }
 
 .ps-ed-thumb-no {
     position: absolute;
-    right: 3px;
-    bottom: 3px;
-    padding: 0 4px;
+    right: 5px;
+    bottom: 5px;
+    padding: 0 5px;
     border-radius: 6px;
     background: rgba(0, 0, 0, 0.55);
     color: #fff;
-    font-size: 10px;
-}
-
-.ps-ed-thumb .ps-thumb-marks {
-    left: 3px;
-    bottom: 3px;
-    gap: 2px;
-}
-
-/* サムネイルの削除。マウスを乗せたときだけ出す */
-.ps-ed-thumb-del {
-    position: absolute;
-    right: 3px;
-    top: 3px;
-    width: 20px;
-    height: 20px;
-    padding: 0;
-    border: none;
-    border-radius: 4px;
-    background: rgba(0, 0, 0, 0.6);
-    color: #fff;
     font-size: 11px;
-    line-height: 20px;
-    cursor: pointer;
-    opacity: 0;
 }
 
-.ps-ed-thumb:hover .ps-ed-thumb-del,
-.ps-ed-thumb:focus-within .ps-ed-thumb-del {
-    opacity: 1;
-}
-
-.ps-ed-thumb-del:hover {
-    background: #dc2626;
-}
-
-/* Ctrl+クリック・Shift+クリックで選んだサムネイル */
-.ps-ed-thumb.ps-selected {
-    border-color: var(--color-accent);
-    box-shadow: 0 0 0 2px var(--color-accent);
-}
-
-.ps-ed-thumb.ps-selected img {
-    opacity: 0.75;
-}
-
-.ps-ed-thumb-check {
-    position: absolute;
-    left: 3px;
-    top: 3px;
-    width: 18px;
-    height: 18px;
-    border-radius: 50%;
-    background: var(--color-accent);
-    color: #fff;
-    font-size: 12px;
-    font-weight: 700;
-    line-height: 18px;
-    text-align: center;
-}
-
-/* キー画像の印と重ならないよう、選んでいるときはキーの印を下げる */
-.ps-ed-thumb.ps-selected .ps-thumb-mark {
-    top: 24px;
-}
-
-/* 選んでいるときに上段の右に出す枚数と操作 */
+/* 選択の操作（サムネイル一覧の上のボタンと同じもの）。上段の右に縦に並べる */
 .ps-ed-thumbs-sel {
     flex: none;
     display: flex;
@@ -1076,9 +1015,20 @@ body.mtm-fs-open {
     font-size: 12px;
 }
 
+.ps-ed-thumbs-sel-all {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    cursor: pointer;
+}
+
 .ps-ed-thumbs-sel-count {
     text-align: center;
     font-weight: 600;
+}
+
+.ps-ed-thumbs-sel-count:empty {
+    display: none;
 }
 
 .ps-ed-thumbs .ps-stack-count {

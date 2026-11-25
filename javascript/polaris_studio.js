@@ -303,9 +303,9 @@
 
     let fs = null;
     let fsTab = "txt2img";
-    let editor = null;              // 編集中の {project, cut, onChange, onPreview, onQueue, onQueues, onClose, images, thumbUrl, keyImage, openImage, deleteImages, marks}
-    const thumbSel = new Set();     // 上段で選んでいる画像の名前
-    let thumbAnchor = "";           // Shift+クリックで範囲を選ぶときの起点
+    // 編集中の {project, cut, onChange, onPreview, onQueue, onQueues, onClose, images, thumbUrl, keyImage, openImage, marks, selection}
+    // selection はサムネイル一覧と共通の選択（プロジェクト管理が持つ）
+    let editor = null;
     let fsPicks = [];               // 追加したタグ（カードの id）の並び
     let fsPicksInitial = [];        // 開いた時点（保存した時点）の並び
     let fsLeftSel = null;           // 左で選んでいるカードの id
@@ -583,6 +583,7 @@
             thumbsWidth = width;
             requestAnimationFrame(stackThumbs);
         }).observe(fq(".ps-ed-thumbs"));
+        setupThumbDrag();
     }
 
     // ---------- カット案のテキストとカードの照合（まだ並びを保存していないカット案を開いたときだけ使う） ----------
@@ -619,8 +620,6 @@
 
     function openEditor(options) {
         editor = options;
-        thumbSel.clear();
-        thumbAnchor = "";
         categories = editor.project.categories;
         entries = editor.project.entries;
         fq(".mtm-fs-search").value = "";
@@ -778,7 +777,7 @@
         const webui = (name) => Number((webuiSlider(name, "txt2img") || {}).number?.value) || 0;
         const size = p.width && p.height ? {width: p.width, height: p.height} : {width: webui("width") || 512, height: webui("height") || 768};
         const images = editor.images();
-        const picked = images.find((x) => thumbSel.has(x.name));
+        const picked = editor.selection ? images.find((x) => editor.selection.has(x.name)) : null;
         const key = editor.keyImage();
         window.PolarisPose.open({
             pose: fsPose,
@@ -1380,29 +1379,28 @@
             return;
         }
         const key = editor.keyImage();
-        const canDelete = !!editor.deleteImages;
-        // 消えた画像は選択から外す
-        const names = new Set(images.map((x) => x.name));
-        for (const name of thumbSel) if (!names.has(name)) thumbSel.delete(name);
-        const tip = canDelete ? "\nクリック：開く／Ctrl+クリック：選択／Shift+クリック：範囲を選択" : "";
+        const sel = editor.selection;
+        const names = images.map((x) => x.name);
         images.forEach((image, i) => {
             const img = el("img", {src: editor.thumbUrl(image), alt: "", loading: "lazy", draggable: "false"});
-            const selected = thumbSel.has(image.name);
-            // 中に削除のボタンを置くので、サムネイル自体はボタンにせず、クリックと Enter で開く
-            const thumb = el("div", {class: "ps-ed-thumb" + (selected ? " ps-selected" : ""), role: "button", tabindex: "0", title: image.name + tip}, [
+            const selected = sel.has(image.name);
+            // サムネイル一覧と同じ操作：クリックで開く、Ctrl+クリックと右上の □ で選ぶ・外す、Shift+クリックで範囲を選ぶ
+            const thumb = el("div", {class: "ps-ed-thumb" + (selected ? " ps-selected" : ""), role: "button", tabindex: "0",
+                title: image.name + "\nクリック：開く／Ctrl+クリック・右上の □：選択／Shift+クリック：範囲を選択／ドラッグで囲む：まとめて選択"}, [
                 img,
                 ...(image === key ? [el("span", {class: "ps-thumb-mark", text: "キー"})] : []),
                 el("span", {class: "ps-ed-thumb-no", text: String(i + 1)}),
                 ...(editor.marks ? editor.marks(image) : []),
-                ...(selected ? [el("span", {class: "ps-ed-thumb-check", text: "✓"})] : []),
-                ...(canDelete ? [el("button", {type: "button", class: "ps-ed-thumb-del", text: "✕", title: "この画像を削除（実ファイルごと。確認が出ます）",
-                    onclick: (e) => {
-                        e.stopPropagation();
-                        editor.deleteImages([image]);
-                    }})] : []),
+                el("span", {class: "ps-thumb-check", title: "選択（Shift+クリックで範囲選択）", text: selected ? "✓" : "", onclick: (e) => {
+                    e.stopPropagation();
+                    if (e.shiftKey) sel.range(names, image.name);
+                    else sel.toggle(image.name);
+                }}),
             ]);
+            thumb.dataset.name = image.name;
             thumb.addEventListener("click", (e) => {
-                if (canDelete && (e.shiftKey || e.ctrlKey || e.metaKey)) selectThumb(images, image, e.shiftKey);
+                if (e.shiftKey) sel.range(names, image.name);
+                else if (e.ctrlKey || e.metaKey) sel.toggle(image.name);
                 else editor.openImage(image);
             });
             thumb.addEventListener("keydown", (e) => {
@@ -1412,37 +1410,105 @@
             });
             box.appendChild(thumb);
         });
-        if (thumbSel.size) {
-            box.appendChild(el("div", {class: "ps-ed-thumbs-sel"}, [
-                el("span", {class: "ps-ed-thumbs-sel-count", text: `${thumbSel.size} 枚を選択中`}),
-                el("button", {type: "button", class: "mtm-btn mtm-danger ps-ed-thumbs-sel-delete", text: "選択を削除",
-                    onclick: () => editor.deleteImages(images.filter((x) => thumbSel.has(x.name)))}),
-                el("button", {type: "button", class: "mtm-btn ps-ed-thumbs-sel-clear", text: "選択を解除", onclick: clearThumbSel}),
-            ]));
-        }
+        // サムネイル一覧と同じ操作のボタン。「すべて選択」はこのカット案の分、枚数と削除・再生成はカット案をまたいだ選択全体
+        const mine = names.filter((n) => sel.has(n)).length;
+        const total = sel.total();
+        const cuts = sel.cuts();
+        const all = el("input", {type: "checkbox", class: "ps-ed-thumbs-all"});
+        all.checked = mine === names.length;
+        all.indeterminate = mine > 0 && mine < names.length;
+        all.addEventListener("change", () => sel.setCut(all.checked ? names : []));
+        const buttons = [
+            el("button", {type: "button", class: "mtm-btn ps-ed-thumbs-sel-clear", text: "選択を解除", onclick: () => sel.clear()}),
+            el("button", {type: "button", class: "mtm-btn ps-ed-thumbs-sel-regen", text: `再生成（${total}枚）`,
+                title: "選んだ画像を、元のプロンプトと Seed のまま Steps だけ変えて作り直すキューを登録します",
+                onclick: (e) => sel.regen(e.currentTarget)}),
+            el("button", {type: "button", class: "mtm-btn mtm-danger ps-ed-thumbs-sel-delete", text: `選択を削除（${total}枚）`,
+                onclick: () => sel.deleteSelected()}),
+        ];
+        buttons.forEach((b) => (b.disabled = !total));
+        box.appendChild(el("div", {class: "ps-ed-thumbs-sel"}, [
+            el("label", {class: "ps-ed-thumbs-sel-all"}, [all, document.createTextNode(" すべて選択")]),
+            el("span", {class: "ps-ed-thumbs-sel-count", title: "選択はカット案をまたいで残ります",
+                text: cuts > 1 || (total && !mine) ? `選択 ${total} 枚・${cuts} カット案` : ""}),
+            ...buttons,
+        ]));
         stackThumbs();
     }
 
-    // Ctrl+クリックは 1 枚ずつ選択・解除、Shift+クリックは前に選んだ画像からここまでを選択に加える
-    function selectThumb(images, image, range) {
-        const list = images.map((x) => x.name);
-        const from = list.indexOf(thumbAnchor);
-        if (range && from >= 0) {
-            const to = list.indexOf(image.name);
-            for (let i = Math.min(from, to); i <= Math.max(from, to); i++) thumbSel.add(list[i]);
-        } else if (thumbSel.has(image.name)) {
-            thumbSel.delete(image.name);
-        } else {
-            thumbSel.add(image.name);
-        }
-        thumbAnchor = image.name;
-        renderThumbs();
-    }
+    // サムネイル一覧と同じく、ドラッグで囲んだ画像を選択に加える。選択済みの画像から始めたときは選択から外す
+    function setupThumbDrag() {
+        const box = fq(".ps-ed-thumbs");
+        let drag = null;
+        let justDragged = false;
 
-    function clearThumbSel() {
-        thumbSel.clear();
-        thumbAnchor = "";
-        renderThumbs();
+        function update() {
+            const {x0, y0, x1, y1, frame, base, remove} = drag;
+            const left = Math.min(x0, x1), top = Math.min(y0, y1), right = Math.max(x0, x1), bottom = Math.max(y0, y1);
+            const r = box.getBoundingClientRect();
+            Object.assign(frame.style, {left: left - r.left + "px", top: top - r.top + "px", width: right - left + "px", height: bottom - top + "px"});
+            const next = new Set(base);
+            for (const thumb of box.querySelectorAll(".ps-ed-thumb")) {
+                const t = thumb.getBoundingClientRect();
+                if (t.left < right && t.right > left && t.top < bottom && t.bottom > top) {
+                    if (remove) next.delete(thumb.dataset.name);
+                    else next.add(thumb.dataset.name);
+                }
+            }
+            drag.next = next;
+            for (const thumb of box.querySelectorAll(".ps-ed-thumb")) {
+                const on = next.has(thumb.dataset.name);
+                thumb.classList.toggle("ps-selected", on);
+                const check = thumb.querySelector(".ps-thumb-check");
+                if (check) check.textContent = on ? "✓" : "";
+            }
+        }
+
+        function move(e) {
+            drag.x1 = e.clientX;
+            drag.y1 = e.clientY;
+            if (!drag.frame.isConnected) {
+                if (Math.hypot(e.clientX - drag.x0, e.clientY - drag.y0) < 5) return;
+                box.appendChild(drag.frame);
+            }
+            update();
+        }
+
+        function up() {
+            window.removeEventListener("mousemove", move);
+            window.removeEventListener("mouseup", up);
+            const d = drag;
+            drag = null;
+            if (!d.frame.isConnected) return;
+            d.frame.remove();
+            justDragged = true;
+            setTimeout(() => (justDragged = false), 0);
+            if (editor && d.next) editor.selection.setCut([...d.next]);
+        }
+
+        box.addEventListener("mousedown", (e) => {
+            if (e.button !== 0 || drag || !editor || !editor.selection) return;
+            if (e.target.closest(".ps-ed-thumbs-sel, .ps-thumb-check, .ps-ed-thumbs-empty")) return;
+            e.preventDefault();   // 文字や画像のドラッグを始めない
+            const start = e.target.closest(".ps-ed-thumb");
+            const names = editor.images().map((x) => x.name);
+            drag = {
+                x0: e.clientX, y0: e.clientY, x1: e.clientX, y1: e.clientY,
+                frame: el("div", {class: "ps-drag-box"}),
+                base: new Set(names.filter((n) => editor.selection.has(n))),
+                remove: !!start && editor.selection.has(start.dataset.name),
+                next: null,
+            };
+            window.addEventListener("mousemove", move);
+            window.addEventListener("mouseup", up);
+        });
+
+        // ドラッグの終わりに起きるクリックでビューワーを開かない
+        box.addEventListener("click", (e) => {
+            if (!justDragged) return;
+            e.stopPropagation();
+            e.preventDefault();
+        }, true);
     }
 
     function stackThumbs() {
@@ -1833,16 +1899,9 @@
             });
             return true;
         },
-        // 上段のサムネイルの選択（ビューワーの S キーで使う）
-        thumbSelected(name) {
-            return thumbSel.has(name);
-        },
-        toggleThumb(name) {
-            if (!editor) return;
-            if (thumbSel.has(name)) thumbSel.delete(name);
-            else thumbSel.add(name);
-            thumbAnchor = name;
-            renderThumbs();
+        // サムネイル一覧やビューワーで選択が変わったときに、上段の選択の表示を直す
+        refreshThumbs() {
+            if (editor) renderThumbs();
         },
         // ビューワーの「プロンプトを戻す」。編集中は保存せず、プロンプト欄に入れるだけにする
         setEditorPrompt(positive, negative) {

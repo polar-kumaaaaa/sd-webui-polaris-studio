@@ -461,7 +461,7 @@
             if (t.closest(".ps-toast")) return;
             if (isOpen(".ps-queue-panel") && !q(".ps-queue-panel").contains(t) && !t.closest(".ps-cut-bar-queue, .mtm-fs-queue")) closeQueueForm();
             if (isOpen(".ps-queues-view") && !q(".ps-queues-view").contains(t) && !t.closest(".ps-open-queues, .mtm-fs-queues")) closeQueueManager();
-            if (isOpen(".ps-regen-panel") && !q(".ps-regen-panel").contains(t) && !t.closest(".ps-gallery-regen")) closeRegenForm();
+            if (isOpen(".ps-regen-panel") && !q(".ps-regen-panel").contains(t) && !t.closest(".ps-gallery-regen, .ps-ed-thumbs-sel-regen")) closeRegenForm();
         }, true);
         fs.addEventListener("keydown", onKeydown, true);
     }
@@ -2406,15 +2406,9 @@
                 selected: selectedImages.has(selKey(cut, image.name)),
                 mark: image === key ? "キー" : "",
                 panels: panelPages(selKey(cut, image.name), project.books, true),
-                onclick: (e) => (e.shiftKey ? selectRange(image.name) : openViewer(image)),
-                select(e) {
-                    if (e.shiftKey) return selectRange(image.name);
-                    const k = selKey(cut, image.name);
-                    if (selectedImages.has(k)) selectedImages.delete(k);
-                    else selectedImages.add(k);
-                    selectAnchor = image.name;
-                    renderGallery();
-                },
+                // 編集画面の上段と同じ操作：クリックで開く、Ctrl+クリックと右上の □ で選ぶ・外す、Shift+クリックで範囲を選ぶ
+                onclick: (e) => (e.shiftKey ? selectRange(image.name) : e.ctrlKey || e.metaKey ? toggleGallerySelect(image.name) : openViewer(image)),
+                select: (e) => (e.shiftKey ? selectRange(image.name) : toggleGallerySelect(image.name)),
             }));
         }
     }
@@ -2437,6 +2431,16 @@
         del.textContent = `選択を削除（${total}枚）`;
         del.disabled = total === 0;
         updateSelBadges();
+        // 編集画面の上に窓で開いた一覧で選んだときは、上段にも合わせる
+        window.PolarisStudio.refreshThumbs();
+    }
+
+    function toggleGallerySelect(name) {
+        const k = selKey(galleryCut, name);
+        if (selectedImages.has(k)) selectedImages.delete(k);
+        else selectedImages.add(k);
+        selectAnchor = name;
+        renderGallery();
     }
 
     // 起点から指定の画像までを選択に加える。起点がなければその1枚だけ
@@ -2600,7 +2604,6 @@
     let viewList = [];
     let viewImage = null;
     let viewCut = null;     // 表示中の画像のカット案
-    let viewFromEditor = false;     // 編集画面の上段のサムネイルから開いたか
     let viewIndex = 0;
     let zoom = 1;
     let fitting = true;
@@ -2620,8 +2623,7 @@
 
     const isEntry = (x, cut, image) => x.cut.id === cut.id && x.image.name === image.name;
 
-    function openViewer(image, cut = galleryCut, fromEditor = false) {
-        viewFromEditor = fromEditor;
+    function openViewer(image, cut = galleryCut) {
         viewList = viewEntries();
         let info = false;
         try {
@@ -2639,7 +2641,7 @@
         q(".ps-gallery-search").value = "";
         q(".ps-gallery-source").value = "";
         q(".ps-gallery-fav").checked = false;
-        openViewer(image, cut, true);
+        openViewer(image, cut);
     }
 
     // ビューワーの「ポーズを抽出」。そのカット案の編集画面（閉じていれば開く）の上にポーズの画面を開き、この画像から取り出す
@@ -2652,25 +2654,19 @@
         window.PolarisStudio.openPose({source: name, detect: true});
     }
 
-    // ビューワーの「選択」。編集画面の上段から開いたときは上段のサムネイルの選択、ほかはサムネイル一覧の選択に加える
+    // ビューワーの「選択」。どこから開いても、サムネイル一覧と編集画面の上段に共通の選択に加える
     function isViewSelected() {
         if (!viewImage || !viewCut) return false;
-        if (viewFromEditor) return window.PolarisStudio.thumbSelected(viewImage.name);
         return selectedImages.has(selKey(viewCut, viewImage.name));
     }
 
     function toggleViewSelect() {
         if (!viewImage || !viewCut) return;
-        if (viewFromEditor) {
-            window.PolarisStudio.toggleThumb(viewImage.name);
-        } else {
-            const k = selKey(viewCut, viewImage.name);
-            if (selectedImages.has(k)) selectedImages.delete(k);
-            else selectedImages.add(k);
-            selectAnchor = viewImage.name;
-            if (galleryCut && isOpen(".ps-gallery-view")) renderGallery();
-        }
-        renderViewMarks();
+        const k = selKey(viewCut, viewImage.name);
+        if (selectedImages.has(k)) selectedImages.delete(k);
+        else selectedImages.add(k);
+        selectAnchor = viewImage.name;
+        selectionChanged();
     }
 
     function showImage(image, cut = viewCut) {
@@ -2971,8 +2967,8 @@
             imageUrl: (image) => imageUrl(project, cut, image, false),
             keyImage: () => keyImageOf(project, cut),
             openImage: (image) => openViewerFor(cut, image),
-            // 上段のサムネイルの ✕。サムネイル一覧の削除と同じ確認を出す
-            deleteImages: (images) => askDeleteImages(images.map((x) => selKey(cut, x.name)), images.length > 1 ? "選択した画像を削除" : "画像を削除"),
+            // 上段のサムネイルの選択。サムネイル一覧と同じ選択を使う
+            selection: editorSelection(cut),
             // 上段のサムネイルの左下の印（サムネイル一覧と同じ、コマとお気に入り）
             marks: (image) => thumbMarks(panelPages(selKey(cut, image.name), project.books, true), isFavorite(cut, image.name)),
             onClose() {
@@ -2983,6 +2979,55 @@
                 fs.focus();
             },
         });
+    }
+
+    // 編集画面の上段に渡す選択の操作。中身はサムネイル一覧の選択（selectedImages）そのもの
+    function editorSelection(cut) {
+        return {
+            has: (name) => selectedImages.has(selKey(cut, name)),
+            toggle(name) {
+                const k = selKey(cut, name);
+                if (selectedImages.has(k)) selectedImages.delete(k);
+                else selectedImages.add(k);
+                selectAnchor = name;
+                selectionChanged();
+            },
+            // 起点から name までを選択に加える。起点がなければその 1 枚だけ
+            range(names, name) {
+                const to = names.indexOf(name);
+                let from = names.indexOf(selectAnchor);
+                if (from < 0) from = to;
+                for (let i = Math.min(from, to); i <= Math.max(from, to); i++) selectedImages.add(selKey(cut, names[i]));
+                selectAnchor = name;
+                selectionChanged();
+            },
+            // このカット案の選択を names に置き換える（ほかのカット案の選択は残す）
+            setCut(names) {
+                for (const n of selectedOf(cut)) selectedImages.delete(selKey(cut, n));
+                names.forEach((n) => selectedImages.add(selKey(cut, n)));
+                selectionChanged();
+            },
+            clear() {
+                selectedImages.clear();
+                selectAnchor = "";
+                selectionChanged();
+            },
+            total: () => selectedImages.size,
+            cuts: () => new Set([...selectedImages].map(selCutId)).size,
+            regen: (button) => openRegenForm(button),
+            deleteSelected: askDeleteSelected,
+        };
+    }
+
+    // 選択が変わったら、サムネイル一覧・カット案の印・編集画面の上段・ビューワーの印を合わせる
+    function selectionChanged() {
+        if (galleryCut && isOpen(".ps-gallery-view")) {
+            renderGallery();
+        } else {
+            updateSelBadges();
+            window.PolarisStudio.refreshThumbs();
+        }
+        if (isOpen(".ps-viewer")) renderViewMarks();
     }
 
     // ---------- 削除の確認 ----------
