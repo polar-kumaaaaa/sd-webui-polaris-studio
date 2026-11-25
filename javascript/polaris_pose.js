@@ -23,8 +23,6 @@
         [0, 170, 255], [0, 85, 255], [0, 0, 255], [85, 0, 255], [170, 0, 255], [255, 0, 255], [255, 0, 170], [255, 0, 85]];
     const HAND_EDGES = [[0, 1], [1, 2], [2, 3], [3, 4], [0, 5], [5, 6], [6, 7], [7, 8], [0, 9], [9, 10], [10, 11], [11, 12], [0, 13], [13, 14], [14, 15], [15, 16], [0, 17], [17, 18], [18, 19], [19, 20]];
 
-    const DETECT_MODULE = "dw_openpose_full";
-    const DETECT_RES = 768;
     const MODES = [["BALANCED", "バランス"], ["PROMPT", "プロンプトを重視"], ["CONTROL", "ControlNet を重視"]];
     const DEFAULT_CONTROL = {use: false, unit: 0, model: "", weight: 1, start: 0, end: 1, mode: "BALANCED"};
     const HIT = 9;                  // 点をつかめる距離（画面の px）
@@ -301,10 +299,11 @@
 
     async function controlnetModels(reload) {
         if (modelCache && !reload) return modelCache;
-        const res = await fetch("controlnet/model_list", {cache: "no-store"});
-        if (!res.ok) throw new Error("ControlNet のモデルの一覧が読めません（" + res.status + "）");
-        const data = await res.json();
-        const list = (data.model_list || []).filter((x) => x && x !== "None");
+        // ControlNet の /controlnet/* の API は Neo では --api のときしか出ないので、ポラスタの API から読む
+        const res = await fetch("polaris-studio/pose/models", {cache: "no-store"});
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || !data.ok) throw new Error("ControlNet のモデルの一覧が読めません（" + (data.error || res.status) + "）");
+        const list = data.models || [];
         // OpenPose のモデルを先に並べる
         modelCache = [...list.filter((x) => /openpose/i.test(x)), ...list.filter((x) => !/openpose/i.test(x))];
         return modelCache;
@@ -331,26 +330,12 @@
         };
     }
 
-    // 画像（URL か Blob）から DWPose でポーズを取り出す。座標は 0〜1、キャンバスは元の画像の大きさ
+    // 画像の Blob から DWPose（dw_openpose_full）でポーズを取り出す。座標は 0〜1、キャンバスは元の画像の大きさ（Python 側で決める）
     async function detect(blob) {
-        const dataUrl = await new Promise((ok, ng) => {
-            const reader = new FileReader();
-            reader.onload = () => ok(reader.result);
-            reader.onerror = () => ng(new Error("画像が読めません"));
-            reader.readAsDataURL(blob);
-        });
-        const size = await imageSize(dataUrl);
-        const res = await fetch("controlnet/detect", {
-            method: "POST",
-            headers: {"Content-Type": "application/json"},
-            body: JSON.stringify({controlnet_module: DETECT_MODULE, controlnet_input_images: [dataUrl], controlnet_processor_res: DETECT_RES}),
-        });
-        if (!res.ok) throw new Error("ポーズを取り出せませんでした（" + res.status + " " + (await res.text()).slice(0, 200) + "）");
-        const data = await res.json();
-        const pose = data.poses && data.poses[0];
-        if (!pose) throw new Error("ポーズを取り出せませんでした");
-        // 取り出した結果の座標は 0〜1 なので、キャンバスを元の画像の大きさにする
-        return {...pose, canvas_width: size.width, canvas_height: size.height};
+        const res = await fetch("polaris-studio/pose/detect", {method: "POST", body: blob});
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || !data.ok || !data.pose) throw new Error("ポーズを取り出せませんでした（" + (data.error || res.status) + "）");
+        return data.pose;
     }
 
     function imageSize(src) {

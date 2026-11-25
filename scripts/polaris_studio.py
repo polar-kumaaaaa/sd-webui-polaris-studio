@@ -2,6 +2,7 @@
 
 プロジェクト（タグ定義・シーン・カット案・キュー）は拡張フォルダ内の data/projects.json に保存する。
 """
+import asyncio
 import base64
 import copy
 import hashlib
@@ -1533,6 +1534,45 @@ def apply_pose(p, pose):
     print(f"[Polaris Studio] pose -> ControlNet unit {pose['unit'] + 1} ({pose['model']})")
 
 
+# ControlNet（WebUI に組み込みのもの）の中身を直接使う。Neo は --api で起動しないと /controlnet/* の API を出さないので、それには頼らない
+def _controlnet_state():
+    try:
+        from lib_controlnet import global_state
+    except Exception as e:
+        raise RuntimeError(f"ControlNet が見つかりません（{e}）")
+    return global_state
+
+
+POSE_DETECT_MODULE = "dw_openpose_full"
+POSE_DETECT_RES = 768
+
+
+def pose_models():
+    return [x for x in _controlnet_state().get_all_controlnet_names() if x and x != "None"]
+
+
+# 画像から DWPose でポーズを取り出す。座標は 0〜1、キャンバスは元の画像の大きさ
+def detect_pose(data):
+    from modules.call_queue import queue_lock
+
+    image = Image.open(io.BytesIO(data)).convert("RGB")
+    processor = _controlnet_state().get_preprocessor(POSE_DETECT_MODULE)
+    if processor is None:
+        raise RuntimeError(f"ControlNet のプリプロセッサ {POSE_DETECT_MODULE} がありません")
+    result = {}
+
+    def accept(pose):
+        result["pose"] = pose
+
+    # 生成と同時に GPU を使わないよう、WebUI の生成と同じ順番待ちに並ぶ
+    with queue_lock:
+        processor(np.array(image), resolution=POSE_DETECT_RES, slider_1=64, slider_2=64, json_pose_callback=accept)
+    pose = result.get("pose")
+    if not isinstance(pose, dict):
+        raise RuntimeError("ポーズを取り出せませんでした")
+    return {**pose, "canvas_width": image.width, "canvas_height": image.height}
+
+
 def take_job():
     global _job
     job, _job = _job, None
@@ -1584,6 +1624,24 @@ def on_app_started(demo, app):
             return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
         _job = {"project": payload["project"], "cut": payload["cut"], "source": str(payload.get("source", "preview")), "pose": pose, "at": time.time()}
         return {"ok": True}
+
+    @app.get("/polaris-studio/pose/models")
+    def get_pose_models():
+        try:
+            return {"ok": True, "models": pose_models()}
+        except Exception as e:
+            return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+    # 画像（リクエスト本文にそのまま入れたバイト列）からポーズを取り出す
+    @app.post("/polaris-studio/pose/detect")
+    async def post_pose_detect(request: Request):
+        data = await request.body()
+        try:
+            pose = await asyncio.to_thread(detect_pose, data)
+        except Exception as e:
+            print(f"[Polaris Studio] pose detect failed: {e}")
+            return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+        return {"ok": True, "pose": pose}
 
     @app.post("/polaris-studio/job/clear")
     def clear_job():
