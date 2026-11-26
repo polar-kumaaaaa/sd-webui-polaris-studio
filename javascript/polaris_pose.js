@@ -24,7 +24,10 @@
     const HAND_EDGES = [[0, 1], [1, 2], [2, 3], [3, 4], [0, 5], [5, 6], [6, 7], [7, 8], [0, 9], [9, 10], [10, 11], [11, 12], [0, 13], [13, 14], [14, 15], [15, 16], [0, 17], [17, 18], [18, 19], [19, 20]];
 
     const MODES = [["BALANCED", "バランス"], ["PROMPT", "プロンプトを重視"], ["CONTROL", "ControlNet を重視"]];
-    const DEFAULT_CONTROL = {use: false, unit: 0, model: "", weight: 1, start: 0, end: 1, mode: "BALANCED"};
+    // depth は、ポーズと一緒に取り出し元の画像の深度を別のユニットに入れる設定（並びは Python 側で保存するときと同じにする）
+    const DEFAULT_DEPTH = {use: false, unit: 1, module: "", model: "", weight: 0.5, start: 0, end: 1};
+    const DEFAULT_CONTROL = {use: false, unit: 0, model: "", weight: 1, start: 0, end: 1, mode: "BALANCED", depth: DEFAULT_DEPTH};
+    const withDefaults = (c) => ({...DEFAULT_CONTROL, ...(c || {}), depth: {...DEFAULT_DEPTH, ...((c && c.depth) || {})}});
     // 体の点をダブルクリックしたときに、そこから体の外に向けてまとめて選ぶ点（hand はその側の手、face は顔も選ぶ）
     const CHAINS = {
         0: {body: [0, 14, 15, 16, 17], face: true},           // 鼻：目・耳と顔
@@ -314,29 +317,32 @@
 
     let modelCache = null;
 
+    let depthModuleCache = [];
     async function controlnetModels(reload) {
         if (modelCache && !reload) return modelCache;
         // ControlNet の /controlnet/* の API は Neo では --api のときしか出ないので、ポラスタの API から読む
         const res = await fetch("polaris-studio/pose/models", {cache: "no-store"});
         const data = await res.json().catch(() => ({}));
         if (!res.ok || !data.ok) throw new Error("ControlNet のモデルの一覧が読めません（" + (data.error || res.status) + "）");
-        const list = data.models || [];
-        // OpenPose のモデルを先に並べる
-        modelCache = [...list.filter((x) => /openpose/i.test(x)), ...list.filter((x) => !/openpose/i.test(x))];
+        modelCache = data.models || [];
+        depthModuleCache = data.depthModules || [];
         return modelCache;
     }
 
-    async function resolveModel(name) {
+    // pattern に合うモデルを先に並べる
+    const modelsFirst = (list, pattern) => [...list.filter((x) => pattern.test(x)), ...list.filter((x) => !pattern.test(x))];
+
+    async function resolveModel(name, pattern = /openpose/i, label = "openpose") {
         if (name) return name;
-        const found = (await controlnetModels()).find((x) => /openpose/i.test(x));
-        if (!found) throw new Error("名前に openpose を含む ControlNet のモデルが見つかりません。ポーズの画面でモデルを選んでください");
+        const found = (await controlnetModels()).find((x) => pattern.test(x));
+        if (!found) throw new Error(`名前に ${label} を含む ControlNet のモデルが見つかりません。ポーズの画面でモデルを選んでください`);
         return found;
     }
 
-    // 生成に渡す形 {image, unit, model, weight, start, end, mode}
+    // 生成に渡す形 {image, unit, model, weight, start, end, mode, depth}。depth は取り出し元の画像の名前と、深度のユニットの設定
     async function jobPayload(job) {
-        const control = {...DEFAULT_CONTROL, ...(job.control || {})};
-        return {
+        const control = withDefaults(job.control);
+        const out = {
             image: renderDataUrl(job.pose),
             unit: control.unit,
             model: await resolveModel(control.model),
@@ -345,6 +351,11 @@
             end: control.end,
             mode: control.mode,
         };
+        const d = control.depth;
+        if (d.use) {
+            out.depth = {...d, model: await resolveModel(d.model, /depth/i, "depth"), name: (job.pose && job.pose.source) || ""};
+        }
+        return out;
     }
 
     // 画像の Blob から DWPose（dw_openpose_full）でポーズを取り出す。座標は 0〜1、キャンバスは元の画像の大きさ（Python 側で決める）
@@ -465,6 +476,19 @@
                         <label class="ps-pose-field">重視<select class="ps-pose-mode">${MODES.map(([v, t]) => `<option value="${v}">${t}</option>`).join("")}</select></label>
                         <div class="ps-pose-note">使うときは、そのユニットを WebUI の設定に関係なくオンにし、プリプロセッサなしでこのポーズの絵を入れます。WebUI の ControlNet の画面は変えません。</div>
                     </section>
+                    <section>
+                        <div class="ps-pose-head">深度（depth）</div>
+                        <label class="ps-pose-check"><input type="checkbox" class="ps-pose-depth-use">取り出し元の画像の深度も入れる</label>
+                        <div class="ps-pose-note ps-pose-depth-source"></div>
+                        <div class="ps-pose-note ps-pose-warn ps-pose-depth-warn ps-off">名前に depth を含む ControlNet のモデルがありません。深度のモデル（SDXL 用）を ControlNet のモデルのフォルダに入れて、↻ で読み直してください。</div>
+                        <label class="ps-pose-field">ユニット<select class="ps-pose-depth-unit"></select></label>
+                        <label class="ps-pose-field">プリプロセッサ<select class="ps-pose-depth-module"></select></label>
+                        <label class="ps-pose-field">モデル<select class="ps-pose-depth-model"></select></label>
+                        <label class="ps-pose-field">重み<input type="number" class="ps-pose-depth-weight" min="0" max="2" step="0.05"></label>
+                        <label class="ps-pose-field">開始<input type="number" class="ps-pose-depth-start" min="0" max="1" step="0.05"></label>
+                        <label class="ps-pose-field">終了<input type="number" class="ps-pose-depth-end" min="0" max="1" step="0.05"></label>
+                        <div class="ps-pose-note">ポーズを取り出した画像の奥行きを、もう 1 つのユニットに入れます。手の形や体の厚み、服や髪の形も元の画像に近づきます。ポーズのユニットと別の番号にしてください。深度の絵は生成のたびに ControlNet が作ります（重視はポーズと同じ）。</div>
+                    </section>
                     <section class="ps-pose-help">
                         <div class="ps-pose-head">操作</div>
                         <div>点をドラッグ：動かす（選んだ点はまとめて）</div>
@@ -584,13 +608,15 @@
             useFile(file, true);
         });
         q(".ps-pose-models").addEventListener("click", () => fillModels(true));
-        for (const sel of [".ps-pose-use", ".ps-pose-unit", ".ps-pose-model", ".ps-pose-weight", ".ps-pose-start", ".ps-pose-end", ".ps-pose-mode"]) {
+        for (const sel of [".ps-pose-use", ".ps-pose-unit", ".ps-pose-model", ".ps-pose-weight", ".ps-pose-start", ".ps-pose-end", ".ps-pose-mode",
+            ".ps-pose-depth-use", ".ps-pose-depth-unit", ".ps-pose-depth-module", ".ps-pose-depth-model", ".ps-pose-depth-weight", ".ps-pose-depth-start", ".ps-pose-depth-end"]) {
             q(sel).addEventListener("change", () => {
                 changed = true;
             });
         }
-        const unit = q(".ps-pose-unit");
-        for (let i = 0; i < 8; i++) unit.appendChild(new Option(`${i + 1} 番目`, String(i)));
+        for (const sel of [".ps-pose-unit", ".ps-pose-depth-unit"]) {
+            for (let i = 0; i < 8; i++) q(sel).appendChild(new Option(`${i + 1} 番目`, String(i)));
+        }
     }
 
     function loadView() {
@@ -625,7 +651,7 @@
         model = options.pose && Array.isArray(options.pose.people)
             ? fromJson(options.pose)
             : {width: size.width || 512, height: size.height || 768, people: [], source: ""};
-        control = {...DEFAULT_CONTROL, ...(options.control || {})};
+        control = withDefaults(options.control);
         undoStack = [];
         redoStack = [];
         selected = new Set();
@@ -641,6 +667,11 @@
         q(".ps-pose-start").value = control.start;
         q(".ps-pose-end").value = control.end;
         q(".ps-pose-mode").value = control.mode;
+        q(".ps-pose-depth-use").checked = control.depth.use;
+        q(".ps-pose-depth-unit").value = String(control.depth.unit);
+        q(".ps-pose-depth-weight").value = control.depth.weight;
+        q(".ps-pose-depth-start").value = control.depth.start;
+        q(".ps-pose-depth-end").value = control.depth.end;
         fillModels(false);
         const images = options.images || [];
         // 取り出すために開いたときは、その画像を選ぶ。ほかは、前に取り出した画像があればそれを下敷きにする
@@ -672,18 +703,34 @@
     }
 
     async function fillModels(reload) {
-        const sel = q(".ps-pose-model");
-        const current = control.model;
-        sel.textContent = "";
-        sel.appendChild(new Option("自動（名前に openpose を含む最初のモデル）", ""));
+        let list = [];
+        let error = "";
         try {
-            const list = await controlnetModels(reload);
-            for (const name of list) sel.appendChild(new Option(name, name));
+            list = await controlnetModels(reload);
         } catch (e) {
-            sel.appendChild(new Option("（一覧が読めません: " + e.message + "）", "::error"));
+            error = e.message;
         }
-        if (current && ![...sel.options].some((o) => o.value === current)) sel.appendChild(new Option(current + "（見つかりません）", current));
-        sel.value = current;
+        const fill = (sel, current, auto, names) => {
+            sel.textContent = "";
+            sel.appendChild(new Option(auto, ""));
+            if (error) sel.appendChild(new Option("（一覧が読めません: " + error + "）", "::error"));
+            for (const name of names) sel.appendChild(new Option(name, name));
+            if (current && ![...sel.options].some((o) => o.value === current)) sel.appendChild(new Option(current + "（見つかりません）", current));
+            sel.value = current;
+        };
+        fill(q(".ps-pose-model"), control.model, "自動（名前に openpose を含む最初のモデル）", modelsFirst(list, /openpose/i));
+        fill(q(".ps-pose-depth-model"), control.depth.model, "自動（名前に depth を含む最初のモデル）", modelsFirst(list, /depth/i));
+        fill(q(".ps-pose-depth-module"), control.depth.module, "自動（" + (depthModuleCache[0] || "depth_anything_v2") + "）", depthModuleCache);
+        const noDepthModel = !error && !list.some((x) => /depth/i.test(x));
+        q(".ps-pose-depth-warn").classList.toggle("ps-off", !noDepthModel);
+    }
+
+    // 深度に使う画像（取り出し元）。カット案の画像から取り出したときだけ使える
+    function updateDepthNote() {
+        const note = q(".ps-pose-depth-source");
+        note.textContent = model.source ? `深度に使う画像：${model.source}（ポーズを取り出した画像）`
+            : "深度に使う画像がありません。カット案の画像から「画像から取り出す」をすると使えます（ファイルやドロップした画像は使えません）";
+        note.classList.toggle("ps-pose-warn", !model.source);
     }
 
     // 取り出し元をサムネイルで並べる（新しい画像が先）。value がなければ、いちばん新しい画像を選ぶ
@@ -1029,16 +1076,26 @@
             const v = Number(q(sel).value);
             return q(sel).value.trim() !== "" && Number.isFinite(v) ? Math.round(clamp(v, lo, hi) * 1000) / 1000 : fallback;
         };
-        const modelName = q(".ps-pose-model").value;
+        const pick = (sel) => (q(sel).value === "::error" ? "" : q(sel).value);
         const start = num(".ps-pose-start", 0, 1, 0);
+        const depthStart = num(".ps-pose-depth-start", 0, 1, 0);
         return {
             use: q(".ps-pose-use").checked,
             unit: Number(q(".ps-pose-unit").value) || 0,
-            model: modelName === "::error" ? "" : modelName,
+            model: pick(".ps-pose-model"),
             weight: num(".ps-pose-weight", 0, 2, 1),
             start,
             end: Math.max(num(".ps-pose-end", 0, 1, 1), start),
             mode: q(".ps-pose-mode").value,
+            depth: {
+                use: q(".ps-pose-depth-use").checked,
+                unit: Number(q(".ps-pose-depth-unit").value) || 0,
+                module: pick(".ps-pose-depth-module"),
+                model: pick(".ps-pose-depth-model"),
+                weight: num(".ps-pose-depth-weight", 0, 2, 0.5),
+                start: depthStart,
+                end: Math.max(num(".ps-pose-depth-end", 0, 1, 1), depthStart),
+            },
         };
     }
 
@@ -1210,6 +1267,7 @@
         q(".ps-pose-hide").disabled = !selected.size;
         q(".ps-pose-unhide").disabled = !selected.size;
         q(".ps-pose-export").disabled = !model.people.length;
+        updateDepthNote();
     }
 
     // ---------- マウス ----------
@@ -1477,5 +1535,5 @@
         e.stopPropagation();
     }
 
-    window.PolarisPose = {open, close, isOpen, renderDataUrl, jobPayload, DEFAULT_CONTROL};
+    window.PolarisPose = {open, close, isOpen, renderDataUrl, jobPayload, DEFAULT_CONTROL, withDefaults};
 })();

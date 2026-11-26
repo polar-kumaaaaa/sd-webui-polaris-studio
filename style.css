@@ -3824,6 +3824,11 @@ body.mtm-fs-open {
     line-height: 1.5;
 }
 
+/* 深度に使う画像がないときや、深度のモデルがないときの注意 */
+.ps-pose-note.ps-pose-warn {
+    color: #d97706;
+}
+
 .ps-pose-help > div:not(.ps-pose-head) {
     padding-left: 2px;
 }

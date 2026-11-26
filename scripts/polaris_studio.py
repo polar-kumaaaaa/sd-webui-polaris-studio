@@ -723,6 +723,24 @@ def _sanitize_pose_control(raw):
         "start": round(start, 3),
         "end": round(max(_clamp_float(raw.get("end"), 0, 1, 1.0), start), 3),
         "mode": mode if mode in POSE_MODES else "BALANCED",
+        "depth": _sanitize_depth_control(raw.get("depth")),
+    }
+
+
+# ポーズと一緒に、取り出し元の画像の深度（depth）を別のユニットに入れる設定。重みは控えめから始める
+def _sanitize_depth_control(raw):
+    raw = raw if isinstance(raw, dict) else {}
+    start = _clamp_float(raw.get("start"), 0, 1, 0.0)
+    return {
+        "use": bool(raw.get("use", False)),
+        "unit": int(_clamp_float(raw.get("unit"), 0, 15, 1)),
+        # 空なら、生成のときに depth_anything_v2 などから使えるものを選ぶ
+        "module": str(raw.get("module", ""))[:100],
+        # 空なら、生成のときに名前に depth を含む最初のモデルを使う
+        "model": str(raw.get("model", ""))[:300],
+        "weight": round(_clamp_float(raw.get("weight"), 0, 2, 0.5), 3),
+        "start": round(start, 3),
+        "end": round(max(_clamp_float(raw.get("end"), 0, 1, 1.0), start), 3),
     }
 
 
@@ -1539,7 +1557,7 @@ def book_zip(project, items):
 
 
 # 生成に使うポーズ。JS で描いたポーズの画像（PNG の base64）と ControlNet の設定
-def _job_pose(raw):
+def _job_pose(raw, project, cut):
     if not isinstance(raw, dict):
         return None
     data = str(raw.get("image", ""))
@@ -1552,7 +1570,49 @@ def _job_pose(raw):
     control = _sanitize_pose_control(raw)
     if not control["model"]:
         raise ValueError("ControlNet のモデルが決まっていません")
-    return {**control, "image": np.array(image)}
+    depth = None
+    if control["depth"]["use"]:
+        depth = _job_depth(control, raw.get("depth"), project, cut)
+    return {**control, "image": np.array(image), "depth": depth}
+
+
+DEPTH_MODULES = ("depth_anything_v2", "depth_anything", "depth_midas", "depth_zoe", "depth_leres++", "depth_leres")
+
+
+def depth_modules():
+    try:
+        names = _controlnet_state().get_filtered_preprocessor_names("Depth")
+    except Exception:
+        return []
+    names = [x for x in names if x and x != "None"]
+    # よく使うものを先に
+    return sorted(names, key=lambda x: DEPTH_MODULES.index(x) if x in DEPTH_MODULES else len(DEPTH_MODULES))
+
+
+# 深度は、ポーズの取り出し元（このカット案の画像）から ControlNet のプリプロセッサで作る（大きさも生成に合わせて ControlNet が直す）
+def _job_depth(control, raw, project, cut):
+    depth = control["depth"]
+    if depth["unit"] == control["unit"]:
+        raise ValueError("深度のユニットは、ポーズと別の番号にしてください")
+    if not depth["model"]:
+        raise ValueError("深度の ControlNet のモデルが決まっていません")
+    name = str((raw or {}).get("name", ""))
+    if not name:
+        raise ValueError("深度は、ポーズをカット案の画像から取り出したときだけ使えます（取り出し元の画像がありません）")
+    path = image_path(project, cut, name)
+    if not os.path.isfile(path):
+        raise ValueError(f"深度に使う取り出し元の画像がありません（{name}）")
+    module = depth["module"]
+    available = depth_modules()
+    if not module:
+        if not available:
+            raise ValueError("ControlNet に深度のプリプロセッサがありません")
+        module = available[0]
+    elif available and module not in available:
+        raise ValueError(f"深度のプリプロセッサ {module} がありません")
+    with Image.open(path) as im:
+        source = np.array(im.convert("RGB"))
+    return {**depth, "module": module, "image": source, "name": name}
 
 
 def _controlnet_script(p):
@@ -1580,12 +1640,7 @@ def apply_pose(p, pose):
     if cn is None:
         raise RuntimeError("[Polaris Studio] ControlNet が見つからないので、ポーズを使えません")
     args = list(p.script_args)
-    index = cn.args_from + pose["unit"]
-    if not cn.args_from <= index < cn.args_to:
-        raise RuntimeError(f"[Polaris Studio] ControlNet のユニット {pose['unit'] + 1} がありません（ユニットは {cn.args_to - cn.args_from} 個）")
-    unit = args[index]
-    values = {
-        "enabled": True,
+    _set_unit(cn, args, pose["unit"], pose["mode"], {
         "module": "None",
         "model": pose["model"],
         "weight": pose["weight"],
@@ -1595,22 +1650,45 @@ def apply_pose(p, pose):
         # ポーズの画像をプレビューとして入れ、それを入力に使う（ControlNet の Upload JSON と同じ）
         "use_preview_as_input": True,
         "generated_image": pose["image"],
-        "image_fg": None,
-        "mask_image": None,
-        "mask_image_fg": None,
-    }
+    })
+    message = f"[Polaris Studio] pose -> ControlNet unit {pose['unit'] + 1} ({pose['model']})"
+    depth = pose.get("depth")
+    if depth:
+        source = depth["image"]
+        _set_unit(cn, args, depth["unit"], pose["mode"], {
+            "module": depth["module"],
+            "model": depth["model"],
+            "weight": depth["weight"],
+            "guidance_start": depth["start"],
+            "guidance_end": depth["end"],
+            # 深度は ControlNet がプリプロセッサで作る。解像度は生成の大きさに合わせる
+            "pixel_perfect": True,
+            "use_preview_as_input": False,
+            "generated_image": None,
+            # reforge は {image, mask} の形だけを読む（Neo もこの形を読める）
+            "image": {"image": source, "mask": np.zeros_like(source)},
+        })
+        message += f", depth -> unit {depth['unit'] + 1} ({depth['module']}, {depth['model']})"
+    p.script_args = tuple(args) if isinstance(p.script_args, tuple) else args
+    print(message)
+
+
+def _set_unit(cn, args, number, mode, values):
+    index = cn.args_from + number
+    if not cn.args_from <= index < cn.args_to:
+        raise RuntimeError(f"[Polaris Studio] ControlNet のユニット {number + 1} がありません（ユニットは {cn.args_to - cn.args_from} 個）")
+    unit = args[index]
+    values = {"enabled": True, "image_fg": None, "mask_image": None, "mask_image_fg": None, **values}
     if isinstance(unit, dict):
-        unit = {**unit, **values, "control_mode": pose["mode"], "resize_mode": "Crop and Resize"}
+        unit = {**unit, **values, "control_mode": mode, "resize_mode": "Crop and Resize"}
     else:
         unit = copy.copy(unit)
-        values["control_mode"] = _enum_member(getattr(unit, "control_mode", None), "ControlMode", pose["mode"])
+        values["control_mode"] = _enum_member(getattr(unit, "control_mode", None), "ControlMode", mode)
         values["resize_mode"] = _enum_member(getattr(unit, "resize_mode", None), "ResizeMode", "INNER_FIT")
         for k, v in values.items():
             if hasattr(unit, k):
                 setattr(unit, k, v)
     args[index] = unit
-    p.script_args = tuple(args) if isinstance(p.script_args, tuple) else args
-    print(f"[Polaris Studio] pose -> ControlNet unit {pose['unit'] + 1} ({pose['model']})")
 
 
 # ControlNet（WebUI に組み込みのもの）の中身を直接使う。Neo は --api で起動しないと /controlnet/* の API を出さないので、それには頼らない
@@ -1733,7 +1811,7 @@ def on_app_started(demo, app):
         except ValueError as e:
             return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
         try:
-            pose = _job_pose(payload.get("pose"))
+            pose = _job_pose(payload.get("pose"), payload["project"], payload["cut"])
         except ValueError as e:
             return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
         _job = {"project": payload["project"], "cut": payload["cut"], "source": str(payload.get("source", "preview")), "pose": pose, "at": time.time()}
@@ -1742,7 +1820,7 @@ def on_app_started(demo, app):
     @app.get("/polaris-studio/pose/models")
     def get_pose_models():
         try:
-            return {"ok": True, "models": pose_models()}
+            return {"ok": True, "models": pose_models(), "depthModules": depth_modules()}
         except Exception as e:
             return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
 

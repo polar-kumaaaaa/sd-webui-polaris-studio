@@ -749,7 +749,7 @@
         fq(".mtm-fs-subseed").value = cut.subseed;
         fq(".mtm-fs-var").value = cut.subseedStrength;
         fsPose = cut.pose ? JSON.parse(JSON.stringify(cut.pose)) : null;
-        fsPoseControl = {...window.PolarisPose.DEFAULT_CONTROL, ...(cut.poseControl || {})};
+        fsPoseControl = window.PolarisPose.withDefaults(cut.poseControl);
         renderPoseButton();
     }
 
@@ -765,7 +765,7 @@
 
     function poseDirty() {
         const saved = editor.cut.pose || null;
-        const savedControl = {...window.PolarisPose.DEFAULT_CONTROL, ...(editor.cut.poseControl || {})};
+        const savedControl = window.PolarisPose.withDefaults(editor.cut.poseControl);
         return JSON.stringify(fsPose) !== JSON.stringify(saved) || JSON.stringify(fsPoseControl) !== JSON.stringify(savedControl);
     }
 
