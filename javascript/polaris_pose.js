@@ -542,11 +542,22 @@
                         <label class="ps-pose-check"><input type="checkbox" class="ps-pose-use">「生成」とキューでこのポーズを使う</label>
                         <label class="ps-pose-field">ユニット<select class="ps-pose-unit"></select></label>
                         <label class="ps-pose-field">モデル<select class="ps-pose-model"></select><button type="button" class="mtm-icon ps-pose-models" title="モデルの一覧を読み直す">↻</button></label>
-                        <label class="ps-pose-field">重み<input type="number" class="ps-pose-weight" min="0" max="2" step="0.05"></label>
-                        <label class="ps-pose-field">開始<input type="number" class="ps-pose-start" min="0" max="1" step="0.05"></label>
-                        <label class="ps-pose-field">終了<input type="number" class="ps-pose-end" min="0" max="1" step="0.05"></label>
-                        <label class="ps-pose-field">重視<select class="ps-pose-mode">${MODES.map(([v, t]) => `<option value="${v}">${t}</option>`).join("")}</select></label>
+                        <label class="ps-pose-field" title="ポーズにどれだけ従わせるか（0〜2）。初期値 1。ポーズどおりにならないときは 1.1〜1.3 に上げます。上げすぎると絵が硬くなります">重み<input type="number" class="ps-pose-weight" min="0" max="2" step="0.05"></label>
+                        <label class="ps-pose-field" title="生成のどの段階からポーズを効かせるか（0〜1。0 が最初）。初期値 0。体の向きや手足の位置は最初のほうで決まるので、ふつうは 0 のままにします">開始<input type="number" class="ps-pose-start" min="0" max="1" step="0.05"></label>
+                        <label class="ps-pose-field" title="生成のどの段階までポーズを効かせるか（0〜1。1 が最後）。初期値 1。0.6〜0.8 に下げると、ポーズは保ったまま細部を自由に描かせられます">終了<input type="number" class="ps-pose-end" min="0" max="1" step="0.05"></label>
+                        <label class="ps-pose-field" title="プロンプトと ControlNet のどちらを優先するか。初期値「バランス」。ポーズに従わないときは「ControlNet を重視」にします">重視<select class="ps-pose-mode">${MODES.map(([v, t]) => `<option value="${v}">${t}</option>`).join("")}</select></label>
                         <div class="ps-pose-note">使うときは、そのユニットを WebUI の設定に関係なくオンにし、プリプロセッサなしでこのポーズの絵を入れます。WebUI の ControlNet の画面は変えません。</div>
+                        <details class="ps-pose-tips">
+                            <summary>重み・開始・終了・重視とは</summary>
+                            <dl>
+                                <dt>重み（初期値 1）</dt>
+                                <dd>ポーズにどれだけ従わせるか。0 で効かず、大きいほど強く従います。ポーズどおりにならないときは 1.1〜1.3。上げすぎると絵が硬くなったり崩れたりします。</dd>
+                                <dt>開始・終了（初期値 0 と 1）</dt>
+                                <dd>生成の何割目から何割目までポーズを効かせるか（0 が最初、1 が最後）。体の向きや手足の位置は最初の 3 割ほどで決まり、後半で細部を描きます。ポーズは開始 0 のまま、細部まで縛られて硬いときは終了を 0.6〜0.8 に下げます。</dd>
+                                <dt>重視（初期値 バランス）</dt>
+                                <dd>プロンプトと ControlNet のどちらを優先するか。ポーズに従わないときは「ControlNet を重視」、プロンプトの内容が出ないときは「プロンプトを重視」。</dd>
+                            </dl>
+                        </details>
                     </section>
                     <section>
                         <div class="ps-pose-head">深度（depth）</div>
@@ -554,11 +565,24 @@
                         <div class="ps-pose-note ps-pose-depth-source"></div>
                         <div class="ps-pose-note ps-pose-warn ps-pose-depth-warn ps-off">名前に depth を含む ControlNet のモデルがありません。深度のモデル（SDXL 用）を ControlNet のモデルのフォルダに入れて、↻ で読み直してください。</div>
                         <label class="ps-pose-field">ユニット<select class="ps-pose-depth-unit"></select></label>
-                        <label class="ps-pose-field">プリプロセッサ<select class="ps-pose-depth-module"></select></label>
+                        <label class="ps-pose-field" title="画像から深度の絵を作る方法。初期値は自動（depth_anything_v2）。モデルの名前に midas とあれば depth_midas に合わせると素直に効きます">プリプロセッサ<select class="ps-pose-depth-module"></select></label>
                         <label class="ps-pose-field">モデル<select class="ps-pose-depth-model"></select></label>
-                        <label class="ps-pose-field">重み<input type="number" class="ps-pose-depth-weight" min="0" max="2" step="0.05"></label>
-                        <label class="ps-pose-field">開始<input type="number" class="ps-pose-depth-start" min="0" max="1" step="0.05"></label>
-                        <label class="ps-pose-field">終了<input type="number" class="ps-pose-depth-end" min="0" max="1" step="0.05"></label>
+                        <label class="ps-pose-field" title="元の画像の形にどれだけ寄せるか（0〜2）。初期値 0.5。服や髪をもっと寄せたいときは 0.6〜0.8、元の画像に寄りすぎるときは 0.3 前後">重み<input type="number" class="ps-pose-depth-weight" min="0" max="2" step="0.05"></label>
+                        <label class="ps-pose-field" title="生成のどの段階から深度を効かせるか（0〜1）。初期値 0。腕などを大きく動かして元の形が混ざるときは 0.3〜0.5 に上げます">開始<input type="number" class="ps-pose-depth-start" min="0" max="1" step="0.05"></label>
+                        <label class="ps-pose-field" title="生成のどの段階まで深度を効かせるか（0〜1）。初期値 1。元の画像に寄りすぎるときは 0.6〜0.8 に下げます">終了<input type="number" class="ps-pose-depth-end" min="0" max="1" step="0.05"></label>
+                        <details class="ps-pose-tips">
+                            <summary>深度の重み・開始・終了の目安</summary>
+                            <dl>
+                                <dt>重み（初期値 0.5）</dt>
+                                <dd>元の画像の形（服・髪・体の厚み・手の形）にどれだけ寄せるか。もっと寄せたいときは 0.6〜0.8、寄りすぎるときは 0.3 前後。ポーズより強くすると、ポーズで動かした手足が元の形に引っ張られます。</dd>
+                                <dt>開始（初期値 0）</dt>
+                                <dd>手足を大きく動かして、元の形が混ざるときは 0.3〜0.5 に上げます。最初のほう（構図を決める段階）はポーズだけで決め、深度は後半の服のしわや形の仕上げに効きます。</dd>
+                                <dt>終了（初期値 1）</dt>
+                                <dd>元の画像に寄りすぎる、細部まで同じになるときは 0.6〜0.8 に下げます。</dd>
+                                <dt>はじめに試す組み合わせ</dt>
+                                <dd>ほぼ同じ姿勢で描き直す：重み 0.5・開始 0・終了 1。腕などを動かした：重み 0.4〜0.5・開始 0〜0.3・終了 1（動かした手足の元の位置は自動で消します）。</dd>
+                            </dl>
+                        </details>
                         <div class="ps-pose-note">ポーズを取り出した画像の奥行きを、もう 1 つのユニットに入れます。手の形や体の厚み、服や髪の形も元の画像に近づきます。ポーズのユニットと別の番号にしてください。深度の絵は生成のたびに ControlNet が作ります（重視はポーズと同じ）。</div>
                         <div class="ps-pose-note">取り出したあとに動かした腕・手・脚は、元の位置を背景の色で塗ってから深度を作ります（元の手足が残らないように）。塗る場所は、ポーズの絵の上に薄い赤で出します。この版より前に取り出したポーズでは塗りません（取り出し直すと塗ります）。</div>
                     </section>

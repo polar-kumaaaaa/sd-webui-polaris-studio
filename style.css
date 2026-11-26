@@ -3824,6 +3824,33 @@ body.mtm-fs-open {
     line-height: 1.5;
 }
 
+/* 重み・開始・終了の説明（押すと開く） */
+.ps-pose-tips {
+    margin-top: 6px;
+    font-size: 12px;
+    line-height: 1.5;
+    color: var(--body-text-color-subdued);
+}
+
+.ps-pose-tips > summary {
+    cursor: pointer;
+    color: var(--body-text-color);
+}
+
+.ps-pose-tips dl {
+    margin: 6px 0 0;
+}
+
+.ps-pose-tips dt {
+    margin-top: 6px;
+    font-weight: 600;
+    color: var(--body-text-color);
+}
+
+.ps-pose-tips dd {
+    margin: 2px 0 0 0;
+}
+
 /* 深度に使う画像がないときや、深度のモデルがないときの注意 */
 .ps-pose-note.ps-pose-warn {
     color: #d97706;
