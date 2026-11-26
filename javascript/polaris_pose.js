@@ -72,11 +72,12 @@
         const w = Math.max(1, Number(json && json.canvas_width) || 512);
         const h = Math.max(1, Number(json && json.canvas_height) || 512);
         const people = Array.isArray(json && json.people) ? json.people : [];
-        // 座標が 0〜1 なら比率、それより大きい値があれば px（ControlNet と同じ見分け方）
+        // 座標が比率（0〜1）か px かを見分ける。取り出した点は画像の外（1 を少し超える）に出ることがあるので、
+        // 2 を超える値があるときだけ px とみなす（ポラスタは比率で保存し、Python も -1〜2 に収める）
         let normalized = true;
         for (const person of people) for (const part of PARTS) {
             const a = person[part.key];
-            if (Array.isArray(a)) for (let i = 0; i < a.length; i += 3) if (a[i + 2] >= 1 && (a[i] > 1 || a[i + 1] > 1)) normalized = false;
+            if (Array.isArray(a)) for (let i = 0; i < a.length; i += 3) if (a[i + 2] >= 1 && (Math.abs(a[i]) > 2 || Math.abs(a[i + 1]) > 2)) normalized = false;
         }
         const sx = normalized ? w : 1;
         const sy = normalized ? h : 1;
