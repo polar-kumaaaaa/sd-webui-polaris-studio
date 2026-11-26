@@ -40,20 +40,55 @@
         if (!res.ok) throw new Error(res.status + " " + (await res.text()));
         const data = await res.json();
         projects = Array.isArray(data.projects) ? data.projects : [];
+        savedJson.clear();
+        onServer.clear();
+        for (const p of projects) {
+            savedJson.set(p.id, JSON.stringify(p));
+            onServer.add(p.id);
+        }
         outputRoot = data.outputRoot || "";
         canTrash = data.trash === true;
     }
 
+    // 保存は、読み込んだとき（または前に保存したとき）から変わったプロジェクトだけを送る。
+    // 一覧全体を送ると、別のブラウザ（タブ）で開いている画面が保存したときに、ほかのプロジェクトを古い内容で上書きしてしまうため
+    const savedJson = new Map();    // プロジェクトの id → 最後に読み込んだか保存した内容（JSON）
+    const onServer = new Set();     // サーバーにあるはずのプロジェクトの id（ないものは新しく作る）
+
     // 保存は順番に行う。前の保存より後の内容が先に届いて、古い内容で上書きされないようにする
     let saving = Promise.resolve();
     function saveProjects() {
-        const body = JSON.stringify({projects});
+        const save = [];
+        for (const p of projects) {
+            const json = JSON.stringify(p);
+            if (savedJson.get(p.id) === json) continue;
+            save.push({project: p, create: !onServer.has(p.id)});
+            savedJson.set(p.id, json);
+            onServer.add(p.id);
+        }
+        const ids = new Set(projects.map((p) => p.id));
+        const del = [...savedJson.keys()].filter((id) => !ids.has(id));
+        del.forEach((id) => {
+            savedJson.delete(id);
+            onServer.delete(id);
+        });
+        if (!save.length && !del.length) return saving;
+        const body = JSON.stringify({save, delete: del});
         saving = saving.then(async () => {
             try {
-                const res = await fetch(API, {method: "POST", headers: {"Content-Type": "application/json"}, body});
+                const res = await fetch(API + "/save", {method: "POST", headers: {"Content-Type": "application/json"}, body});
                 if (!res.ok) throw new Error(res.status + " " + (await res.text()));
+                const data = await res.json();
+                // ほかの画面で消したプロジェクトは作り直さない
+                if (data.missing && data.missing.length) {
+                    const titles = projects.filter((p) => data.missing.includes(p.id)).map((p) => p.title);
+                    data.missing.forEach((id) => onServer.delete(id));
+                    alert(`「${titles.join("」「")}」は、ほかの画面で削除されているため保存しませんでした。プロジェクトの一覧を開き直してください。`);
+                }
             } catch (e) {
                 console.error("[Polaris Studio] save failed", e);
+                // 次の保存でもう一度送る
+                save.forEach((x) => savedJson.delete(x.project.id));
                 alert("プロジェクトの保存に失敗しました。\n" + e);
             }
         });
@@ -1904,6 +1939,8 @@
             pages: () => pageItems(book),
             // 上部バーの真ん中の「プロジェクトへ戻る」。編集画面を閉じたあとに呼ばれ、Book の画面も閉じる
             projectTitle: () => project.title,
+            // オノマトペのパレット（登録した文字列と調整済みスタンプ）はプロジェクトごと
+            projectId: project.id,
             onProject: () => closeBooks(),
             // はめ込む画像は、カット案を選んでから、そのカット案の画像（古い順）から選ぶ。
             // panels はこの Book のコマで使っているページの名前（カット案ではその画像のどれかを使っているページ）

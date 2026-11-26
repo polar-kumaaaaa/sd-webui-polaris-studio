@@ -231,6 +231,34 @@ def sanitize_projects(raw):
     return {"projects": [_sanitize_project(p) for p in _dicts(raw.get("projects"))]}
 
 
+def apply_project_changes(payload):
+    """変わったプロジェクトだけを差し替える。ほかのプロジェクトはファイルにあるままにするので、
+    別のブラウザ（タブ）で開いている画面が保存しても、ここで開いていない変更を古い内容で上書きしない。
+    save: [{project, create}]。create のないプロジェクトがファイルになければ（ほかの画面で消した）作り直さない。
+    delete: プロジェクトの id。そのオノマトペのパレットも消す。呼ぶ側で _lock を取る"""
+    data = load_projects()
+    projects = data["projects"]
+    missing = []
+    for item in _dicts(payload.get("save")):
+        if not isinstance(item.get("project"), dict):
+            continue
+        project = _sanitize_project(item["project"])
+        index = next((i for i, p in enumerate(projects) if p["id"] == project["id"]), None)
+        if index is not None:
+            projects[index] = project
+        elif item.get("create"):
+            # 新しいプロジェクトは一覧の先頭に（画面でも先頭に足している）
+            projects.insert(0, project)
+        else:
+            missing.append(project["id"])
+    deleted = {str(x) for x in payload.get("delete") or []}
+    data["projects"] = [p for p in projects if p["id"] not in deleted]
+    save_projects(data)
+    for pid in deleted:
+        delete_sfx_library(pid)
+    return data, missing
+
+
 def _sanitize_project(raw):
     categories, entries = _sanitize_tags(raw)
     scenes = [_sanitize_scene(s) for s in _dicts(raw.get("scenes"))]
@@ -980,9 +1008,11 @@ def font_bytes(font_id):
 
 # ---------- オノマトペ ----------
 # 字形の輪郭はサーバーが fontTools で取り出し、ブラウザで並べ・ゆらして描く。
-# 登録した文字列と調整済みスタンプは、プロジェクトをまたいで使えるよう data/sfx.json に置く
+# 登録した文字列と調整済みスタンプは、プロジェクトごとに data/sfx/<プロジェクトの id>.json に置く。
+# 以前はプロジェクトをまたいで共通の data/sfx.json だった（初めて読むときに、そのときあるプロジェクトそれぞれに写す）
 
-SFX_FILE = os.path.join(DATA_DIR, "sfx.json")
+SFX_DIR = os.path.join(DATA_DIR, "sfx")
+LEGACY_SFX_FILE = os.path.join(DATA_DIR, "sfx.json")
 SFX_PARAMS_MAX = 8000       # 1 つのスタンプの設定（JSON）の大きさの上限
 SFX_WORDS_MAX = 20000
 SFX_STAMPS_MAX = 500
@@ -1026,16 +1056,50 @@ def sanitize_sfx_library(raw):
     return {"words": words[:SFX_WORDS_MAX] if isinstance(words, str) else "", "stamps": stamps}
 
 
-def load_sfx_library():
+def sfx_file(project_id):
+    project_id = str(project_id or "")
+    if not re.fullmatch(ID_PATTERN, project_id):
+        raise ValueError("bad project id")
+    return os.path.join(SFX_DIR, project_id + ".json")
+
+
+def _write_json(path, data):
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump({"version": 1, **data}, f, ensure_ascii=False, indent=2)
+    os.replace(tmp, path)
+
+
+def migrate_legacy_sfx():
+    """共通の data/sfx.json が残っていて、data/sfx/ がまだなければ、今あるプロジェクトそれぞれに写す。
+    写したあとの data/sfx.json は data/sfx.legacy-<時刻>.json に名前を変えて残す。呼ぶ側で _lock を取る"""
+    if os.path.isdir(SFX_DIR) or not os.path.exists(LEGACY_SFX_FILE):
+        return
     try:
-        with open(SFX_FILE, "r", encoding="utf-8") as f:
+        with open(LEGACY_SFX_FILE, "r", encoding="utf-8") as f:
+            data = sanitize_sfx_library(json.load(f))
+    except Exception as e:
+        print(f"[Polaris Studio] failed to load {LEGACY_SFX_FILE}: {e}")
+        return
+    os.makedirs(SFX_DIR, exist_ok=True)
+    for project in load_projects()["projects"]:
+        _write_json(sfx_file(project["id"]), data)
+    os.replace(LEGACY_SFX_FILE, os.path.join(DATA_DIR, f"sfx.legacy-{int(time.time())}.json"))
+    print("[Polaris Studio] copied the shared onomatopoeia palette to each project")
+
+
+def load_sfx_library(project_id):
+    migrate_legacy_sfx()
+    path = sfx_file(project_id)
+    try:
+        with open(path, "r", encoding="utf-8") as f:
             return sanitize_sfx_library(json.load(f))
     except FileNotFoundError:
         return sanitize_sfx_library({})
     except Exception as e:
-        print(f"[Polaris Studio] failed to load {SFX_FILE}: {e}")
-        broken = os.path.join(DATA_DIR, f"sfx.broken-{int(time.time())}.json")
-        os.replace(SFX_FILE, broken)
+        print(f"[Polaris Studio] failed to load {path}: {e}")
+        broken = os.path.join(SFX_DIR, f"{os.path.basename(path)[:-5]}.broken-{int(time.time())}.json")
+        os.replace(path, broken)
         return sanitize_sfx_library({})
 
 
@@ -1045,17 +1109,32 @@ def _sfx_amount(data):
     return len([w for w in words.splitlines() if w.strip()]), len(_dicts(data.get("stamps")))
 
 
-def save_sfx_library(data):
-    os.makedirs(DATA_DIR, exist_ok=True)
+def save_sfx_library(project_id, data):
+    migrate_legacy_sfx()
+    path = sfx_file(project_id)
+    os.makedirs(SFX_DIR, exist_ok=True)
     try:
-        backup_file(SFX_FILE, "sfx", data, _sfx_amount)
+        backup_file(path, f"sfx-{project_id}", data, _sfx_amount)
     except Exception as e:
         # 控えが取れなくても保存は止めない
-        print(f"[Polaris Studio] failed to back up {SFX_FILE}: {e}")
-    tmp = SFX_FILE + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump({"version": 1, **data}, f, ensure_ascii=False, indent=2)
-    os.replace(tmp, SFX_FILE)
+        print(f"[Polaris Studio] failed to back up {path}: {e}")
+    _write_json(path, data)
+
+
+# プロジェクトを消したときに、そのパレットも消す（控えには残す）
+def delete_sfx_library(project_id):
+    try:
+        path = sfx_file(project_id)
+    except ValueError:
+        return
+    if not os.path.exists(path):
+        return
+    try:
+        os.makedirs(BACKUP_DIR, exist_ok=True)
+        shutil.copyfile(path, os.path.join(BACKUP_DIR, f"sfx-{project_id}-deleted-{time.strftime('%Y%m%d-%H%M%S')}.json"))
+    except Exception as e:
+        print(f"[Polaris Studio] failed to back up {path}: {e}")
+    os.remove(path)
 
 
 def _ttfont(font_id):
@@ -1776,18 +1855,23 @@ def on_app_started(demo, app):
         except Exception as e:
             return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
 
-    # オノマトペの登録した文字列と調整済みスタンプ（プロジェクトをまたいで共通）
+    # オノマトペの登録した文字列と調整済みスタンプ（プロジェクトごと）
     @app.get("/polaris-studio/sfx")
-    def get_sfx():
-        with _lock:
-            return {"ok": True, **load_sfx_library()}
+    def get_sfx(project: str = ""):
+        try:
+            with _lock:
+                return {"ok": True, **load_sfx_library(project)}
+        except ValueError as e:
+            return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
 
     @app.post("/polaris-studio/sfx")
     def put_sfx(payload: dict = Body(...)):
         data = sanitize_sfx_library(payload)
         try:
             with _lock:
-                save_sfx_library(data)
+                save_sfx_library(payload.get("project"), data)
+        except ValueError as e:
+            return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
         except Exception as e:
             return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
         return {"ok": True, **data}
@@ -1822,15 +1906,15 @@ def on_app_started(demo, app):
             _t2i = None
         return {"ok": True}
 
-    @app.post("/polaris-studio/projects")
-    def put_projects(payload: dict = Body(...)):
-        data = sanitize_projects(payload)
+    # 変わったプロジェクトだけを保存する（一覧全体の上書きはしない。古い画面が保存してもほかのプロジェクトを消さないように）
+    @app.post("/polaris-studio/projects/save")
+    def save_project_changes(payload: dict = Body(...)):
         try:
             with _lock:
-                save_projects(data)
+                _, missing = apply_project_changes(payload)
         except Exception as e:
             return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
-        return {"ok": True, **data}
+        return {"ok": True, "missing": missing}
 
     # Book の画像とコマページを並び順に ZIP にして返す。ファイル名は JS 側で Book のタイトルから付ける
     @app.post("/polaris-studio/books/export")

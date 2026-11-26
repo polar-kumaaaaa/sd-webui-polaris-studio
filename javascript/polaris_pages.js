@@ -1540,8 +1540,10 @@
     // 文字列と調整済みスタンプはプロジェクトをまたいで共通（サーバーの data/sfx.json）
 
     const SFX = () => window.PolarisSfx;
-    let sfxLib = {words: "", stamps: []};
+    let sfxLib = {words: "", stamps: []};   // 開いているプロジェクトのパレット（登録した文字列と調整済みスタンプ）
     let sfxLibLoaded = false;
+    let sfxLibProject = "";                 // sfxLib がどのプロジェクトのものか
+    let sfxLibReady = false;                // 読み込みが済んだか（済む前は保存しない。空のパレットで上書きしないように）
     let stampSource = null;     // スタンプモードで置くもの {kind: "word" | "stamp", id, params}
     let sfxBefore = null;       // 詳細の調整で、つまみを動かし始める前の状態（離したときに 1 回の変更にする）
     const sfxPending = new Set();   // 字形が届いたら枠を合わせ直すオノマトペの id
@@ -1817,24 +1819,35 @@
         box.querySelectorAll("[data-sfx-dir]").forEach((b) => b.addEventListener("click", () => editSfx((p) => (p.vertical = b.dataset.sfxDir === "v"), true)));
     }
 
+    // パレットはプロジェクトごと。別のプロジェクトの Book を開いたら読み直す
     async function loadSfxLibrary() {
-        if (sfxLibLoaded) return;
+        const project = ed ? ed.opts.projectId : "";
+        if (!project || (sfxLibLoaded && sfxLibProject === project)) return;
         sfxLibLoaded = true;
+        sfxLibProject = project;
+        sfxLibReady = false;
+        sfxLib = {words: "", stamps: []};
+        renderSfxPalette();
         try {
-            const res = await fetch("polaris-studio/sfx", {cache: "no-store"});
+            const res = await fetch(`polaris-studio/sfx?project=${encodeURIComponent(project)}`, {cache: "no-store"});
             const data = await res.json();
             if (!res.ok || !data.ok) throw new Error(data.error || res.status);
+            // 読み込む間に別のプロジェクトへ移っていたら捨てる
+            if (sfxLibProject !== project) return;
             sfxLib = {words: data.words || "", stamps: data.stamps || []};
+            sfxLibReady = true;
         } catch (err) {
             console.warn("[Polaris Studio] sfx library failed", err);
-            sfxLibLoaded = false;
+            if (sfxLibProject === project) sfxLibLoaded = false;
         }
         renderSfxPalette();
     }
 
     async function saveSfxLibrary() {
+        if (!sfxLibProject || !sfxLibReady) return;
         try {
-            const res = await fetch("polaris-studio/sfx", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(sfxLib)});
+            const res = await fetch("polaris-studio/sfx", {method: "POST", headers: {"Content-Type": "application/json"},
+                body: JSON.stringify({project: sfxLibProject, ...sfxLib})});
             const data = await res.json().catch(() => ({}));
             if (!res.ok || !data.ok) throw new Error(data.error || res.status);
         } catch (err) {
