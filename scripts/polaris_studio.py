@@ -1649,7 +1649,42 @@ def detect_pose(data):
     pose = result.get("pose")
     if not isinstance(pose, dict):
         raise RuntimeError("ポーズを取り出せませんでした")
-    return {**pose, "canvas_width": image.width, "canvas_height": image.height}
+    return pose_to_original(pose, image.width, image.height, POSE_DETECT_RES)
+
+
+# 取り出す前に、画像は短い辺を resolution に縮め（ControlNet の resize_image_with_pad）、右と下を 64 の倍数まで伸ばしている。
+# 点はその縮めた画像の座標（px か、伸ばした画像に対する 0〜1）で返るので、元の画像の px に直す
+def pose_to_original(pose, width, height, resolution):
+    k = float(resolution) / float(min(width, height))
+    target_w = max(1, int(round(width * k)))
+    target_h = max(1, int(round(height * k)))
+    padded_w = float(pose.get("canvas_width") or 0) or target_w + (-target_w % 64)
+    padded_h = float(pose.get("canvas_height") or 0) or target_h + (-target_h % 64)
+    keys = ("pose_keypoints_2d", "hand_left_keypoints_2d", "hand_right_keypoints_2d", "face_keypoints_2d")
+    people = [p for p in pose.get("people") or [] if isinstance(p, dict)]
+    # 見つかった点に 1 より大きい値があれば px（ControlNet と同じ見分け方）
+    pixel = any(
+        isinstance(p.get(key), list) and any(
+            p[key][i + 2] >= 1 and (p[key][i] > 1 or p[key][i + 1] > 1) for i in range(0, len(p[key]) - 2, 3))
+        for p in people for key in keys)
+    sx = width / target_w * (1 if pixel else padded_w)
+    sy = height / target_h * (1 if pixel else padded_h)
+    out = []
+    for p in people:
+        q = dict(p)
+        for key in keys:
+            a = p.get(key)
+            if not isinstance(a, list):
+                continue
+            b = list(a)
+            for i in range(0, len(b) - 2, 3):
+                # 見つからなかった点は (0, 0) のまま残す
+                if b[i + 2] >= 1 or b[i] or b[i + 1]:
+                    b[i] = round(float(b[i]) * sx, 2)
+                    b[i + 1] = round(float(b[i + 1]) * sy, 2)
+            q[key] = b
+        out.append(q)
+    return {**pose, "people": out, "canvas_width": width, "canvas_height": height}
 
 
 def take_job():
