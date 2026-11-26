@@ -530,6 +530,8 @@
         fq(".ps-confirm-save").addEventListener("click", () => {
             // 差分はこの確認の中で見せているので、もう一度は聞かない
             const next = fsPendingNext;
+            // 閉じたあとに届いた 2 度目のクリックでは何もしない
+            if (!next) return;
             finishConfirm(false);
             commitEditor();
             next();
@@ -983,7 +985,7 @@
         fq(".ps-confirm-dialog").classList.add("ps-off");
         const next = fsPendingNext;
         fsPendingNext = null;
-        if (run) next();
+        if (run && next) next();
     }
 
     // ---------- 保存履歴 ----------
