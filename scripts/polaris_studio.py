@@ -671,7 +671,10 @@ POSE_PARTS = {"pose_keypoints_2d": 18, "hand_left_keypoints_2d": 21, "hand_right
 POSE_MODES = ("BALANCED", "PROMPT", "CONTROL")
 POSE_MAX_PEOPLE = 20
 POSE_DETECTED_KEY = "polaris_detected"
-DEPTH_ERASE_MAX = 300
+POSE_PAINT_KEY = "polaris_paint"
+POSE_PAINT_MAX = 200          # 塗った線の数
+POSE_PAINT_POINTS = 600       # 1 本の線の点の数
+DEPTH_ERASE_MAX = 20000       # 消す範囲（線と円）の数。塗った線の点のあいだも 1 つずつ数える
 
 
 def _clamp_float(value, low, high, default):
@@ -708,13 +711,24 @@ def _sanitize_pose(raw):
             if det["pose_keypoints_2d"] is not None:
                 out[POSE_DETECTED_KEY] = det
         people.append(out)
-    return {
+    out = {
         "canvas_width": _positive_int(raw.get("canvas_width"), 512),
         "canvas_height": _positive_int(raw.get("canvas_height"), 512),
         "people": people,
         # 取り出し元の画像（カット案のフォルダの中の名前）。エディタの下敷きに使う
         "source": os.path.basename(str(raw.get("source", ""))),
     }
+    # 深度から消す範囲を手で塗った線（座標は比率、太さは短い辺に対する比。keep は消さない範囲）
+    paint = []
+    for s in _dicts(raw.get(POSE_PAINT_KEY))[:POSE_PAINT_MAX]:
+        pts = [[round(_clamp_float(p[0], -1.0, 2.0, 0.0), 5), round(_clamp_float(p[1], -1.0, 2.0, 0.0), 5)]
+               for p in (s.get("pts") or [])[:POSE_PAINT_POINTS] if isinstance(p, list) and len(p) == 2]
+        if pts:
+            paint.append({"mode": "keep" if s.get("mode") == "keep" else "erase",
+                          "w": round(_clamp_float(s.get("w"), 0.001, 1.0, 0.05), 5), "pts": pts})
+    if paint:
+        out[POSE_PAINT_KEY] = paint
+    return out
 
 
 def _sanitize_pose_control(raw):
@@ -749,6 +763,8 @@ def _sanitize_depth_control(raw):
         "weight": round(_clamp_float(raw.get("weight"), 0, 2, 0.5), 3),
         "start": round(start, 3),
         "end": round(max(_clamp_float(raw.get("end"), 0, 1, 1.0), start), 3),
+        # 動かした手足の元の位置を自動で消す太さの倍率
+        "grow": round(_clamp_float(raw.get("grow"), 0.5, 2.5, 1.0), 2),
     }
 
 
@@ -1624,34 +1640,45 @@ def _job_depth(control, raw, project, cut):
     return {**depth, "module": module, "image": np.array(source), "name": name, "erased": erased}
 
 
-# ポーズで動かした手足の元の位置（JS が決めた線と円。座標は 0〜1、太さは短い辺に対する比）を、背景の色で塗る。
-# 元の手足が深度に残ると、ポーズで動かした手足と一緒に元の手足も描かれてしまうため。塗った数を返す
+# ポーズで動かした手足の元の位置と、手で塗った範囲（JS が決めた線と円。座標は 0〜1、太さは短い辺に対する比）を、背景の色で塗る。
+# 元の手足が深度に残ると、ポーズで動かした手足と一緒に元の手足も描かれてしまうため。
+# keep の付いたものは「消さない範囲」で、塗ったあとにその部分だけ元の画像に戻す。消す範囲の数を返す
 def erase_moved_limbs(image, shapes):
     shapes = _dicts(shapes)[:DEPTH_ERASE_MAX]
     if not shapes:
         return 0
     w, h = image.size
     short = min(w, h)
+    original = image.copy()
     # 背景の色は、画像の縁の色の中央値
     arr = np.asarray(image)
     border = np.concatenate([arr[0], arr[-1], arr[:, 0], arr[:, -1]])
     color = tuple(int(v) for v in np.median(border, axis=0))
-    draw = ImageDraw.Draw(image)
+    keep_mask = Image.new("L", image.size, 0)
+    draws = {False: (ImageDraw.Draw(image), color), True: (ImageDraw.Draw(keep_mask), 255)}
     count = 0
+    has_keep = False
     for s in shapes:
         a, b = s.get("a"), s.get("b")
         if not (isinstance(a, list) and isinstance(b, list) and len(a) == 2 and len(b) == 2):
             continue
+        keep = bool(s.get("keep"))
+        draw, fill = draws[keep]
         ax, ay = _clamp_float(a[0], -1, 2, 0) * w, _clamp_float(a[1], -1, 2, 0) * h
         bx, by = _clamp_float(b[0], -1, 2, 0) * w, _clamp_float(b[1], -1, 2, 0) * h
         width = max(1.0, _clamp_float(s.get("w"), 0, 1, 0) * short)
         r = width / 2
         # 線の両端は丸くする
         if (ax, ay) != (bx, by):
-            draw.line([(ax, ay), (bx, by)], fill=color, width=int(round(width)))
+            draw.line([(ax, ay), (bx, by)], fill=fill, width=int(round(width)))
         for x, y in ((ax, ay), (bx, by)):
-            draw.ellipse([x - r, y - r, x + r, y + r], fill=color)
-        count += 1
+            draw.ellipse([x - r, y - r, x + r, y + r], fill=fill)
+        if keep:
+            has_keep = True
+        else:
+            count += 1
+    if has_keep:
+        image.paste(original, (0, 0), keep_mask)
     return count
 
 

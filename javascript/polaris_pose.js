@@ -16,6 +16,8 @@
     const PART = Object.fromEntries(PARTS.map((x) => [x.id, x]));
     // 画像から取り出したときの体と手を、人ごとにこの名前で一緒に保存する（顔は使わない）
     const DETECTED_KEY = "polaris_detected";
+    // 深度から消す範囲を手で塗った線。mode は "erase"（消す）か "keep"（消さない）。座標は比率、太さは短い辺に対する比
+    const PAINT_KEY = "polaris_paint";
     const ORIG_PARTS = PARTS.filter((x) => x.id !== "face");
     const BODY_NAMES = ["鼻", "首", "右肩", "右ひじ", "右手首", "左肩", "左ひじ", "左手首", "右腰", "右ひざ", "右足首", "左腰", "左ひざ", "左足首", "右目", "左目", "右耳", "左耳"];
     const FINGER_NAMES = ["親指", "人差し指", "中指", "薬指", "小指"];
@@ -28,7 +30,8 @@
 
     const MODES = [["BALANCED", "バランス"], ["PROMPT", "プロンプトを重視"], ["CONTROL", "ControlNet を重視"]];
     // depth は、ポーズと一緒に取り出し元の画像の深度を別のユニットに入れる設定（並びは Python 側で保存するときと同じにする）
-    const DEFAULT_DEPTH = {use: false, unit: 1, module: "", model: "", weight: 0.5, start: 0, end: 1};
+    // grow は、動かした手足の元の位置を自動で消す太さの倍率
+    const DEFAULT_DEPTH = {use: false, unit: 1, module: "", model: "", weight: 0.5, start: 0, end: 1, grow: 1};
     const DEFAULT_CONTROL = {use: false, unit: 0, model: "", weight: 1, start: 0, end: 1, mode: "BALANCED", depth: DEFAULT_DEPTH};
     const withDefaults = (c) => ({...DEFAULT_CONTROL, ...(c || {}), depth: {...DEFAULT_DEPTH, ...((c && c.depth) || {})}});
     // 体の点をダブルクリックしたときに、そこから体の外に向けてまとめて選ぶ点（hand はその側の手、face は顔も選ぶ）
@@ -109,7 +112,14 @@
             list.push(out);
         }
         for (const person of list) placeHidden(person, w, h);
-        return {width: w, height: h, people: list, source: (json && json.source) || ""};
+        // 深度から消す範囲を手で塗った線（比率で保存している。px の JSON には入っていない）
+        const short = Math.min(w, h);
+        const paint = normalized && Array.isArray(json && json[PAINT_KEY]) ? json[PAINT_KEY].filter((s) => s && Array.isArray(s.pts)).map((s) => ({
+            mode: s.mode === "keep" ? "keep" : "erase",
+            w: Math.max(1, (Number(s.w) || 0) * short),
+            pts: s.pts.filter((p) => Array.isArray(p) && p.length === 2).map(([x, y]) => ({x: Number(x) * w, y: Number(y) * h})),
+        })).filter((s) => s.pts.length) : [];
+        return {width: w, height: h, people: list, source: (json && json.source) || "", paint};
     }
 
     // 保存する形（座標は 0〜1）。pixel が真なら px にする（JSON の書き出し用）
@@ -132,6 +142,11 @@
                 return out;
             }),
             ...(pixel ? {} : {source: model.source || ""}),
+            ...(!pixel && model.paint && model.paint.length ? {[PAINT_KEY]: model.paint.map((s) => ({
+                mode: s.mode,
+                w: r(s.w / Math.min(model.width, model.height)),
+                pts: s.pts.map((p) => [r(p.x * sx), r(p.y * sy)]),
+            }))} : {}),
         };
     }
 
@@ -361,14 +376,16 @@
         {chain: [11, 12, 13]},
     ];
 
-    function eraseAreas(poseJson) {
+    // grow は自動で消す範囲の太さの倍率。手で塗った線（keep は「消さない」）も最後に足す
+    function eraseAreas(poseJson, grow = 1) {
         const m = fromJson(poseJson);
         const W = m.width;
         const H = m.height;
         const short = Math.min(W, H);
         const moveLimit = Math.max(6, short * 0.02);   // これより動いた点を「動かした」とみなす
         const out = [];
-        const add = (a, b, width) => out.push({a: [a.x / W, a.y / H], b: [b.x / W, b.y / H], w: width / short});
+        const g = clamp(Number(grow) || 1, 0.5, 3);
+        const add = (a, b, width) => out.push({a: [a.x / W, a.y / H], b: [b.x / W, b.y / H], w: width * g / short});
         const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
         for (const person of m.people) {
             const orig = person.orig;
@@ -379,7 +396,8 @@
             const moved = (o, c) => seen(o) && (!c || !c.v || dist(o, c) > moveLimit);
             // 手足の太さは肩幅から決める（なければ画像の大きさから）
             const shoulders = seen(ob[2]) && seen(ob[5]) ? dist(ob[2], ob[5]) : 0;
-            const limbWidth = Math.max(12, shoulders ? shoulders * 0.45 : short * 0.06);
+            // 袖や服の厚みも消えるよう、腕の太さより広めにとる
+            const limbWidth = Math.max(12, shoulders ? shoulders * 0.6 : short * 0.08);
             for (const limb of ERASE_LIMBS) {
                 const ch = limb.chain;
                 const mv = ch.map((i) => moved(ob[i], person.body[i]));
@@ -399,13 +417,20 @@
                     // 手の大きさ（手首から中指の先まで）に合わせた太さで、指の線をなぞる
                     const tip = [12, 11, 10, 9].map((i) => oh[i]).find(seen);
                     const size = seen(oh[0]) && tip ? dist(oh[0], tip) : limbWidth * 1.5;
-                    const w = Math.max(10, size * 0.45);
+                    const w = Math.max(10, size * 0.6);
                     for (const [i, j] of HAND_EDGES) if (seen(oh[i]) && seen(oh[j])) add(oh[i], oh[j], w);
                 } else if (wristMoved && seen(wrist)) {
                     // 手が取り出せていなくても、手首を動かしたら手のあたりを消す
                     add(wrist, wrist, limbWidth * 2.2);
                 }
             }
+        }
+        // 手で塗った線（倍率はかけない）。点のあいだを線でつなぐ
+        for (const s of m.paint || []) {
+            const keep = s.mode === "keep";
+            const push = (a, b) => out.push({a: [a.x / W, a.y / H], b: [b.x / W, b.y / H], w: s.w / short, ...(keep ? {keep: true} : {})});
+            if (s.pts.length === 1) push(s.pts[0], s.pts[0]);
+            for (let i = 1; i < s.pts.length; i++) push(s.pts[i - 1], s.pts[i]);
         }
         return out;
     }
@@ -425,7 +450,7 @@
         const d = control.depth;
         if (d.use) {
             out.depth = {...d, model: await resolveModel(d.model, /depth/i, "depth"), name: (job.pose && job.pose.source) || "",
-                erase: job.pose ? eraseAreas(job.pose) : []};
+                erase: job.pose ? eraseAreas(job.pose, d.grow) : []};
         }
         return out;
     }
@@ -458,7 +483,9 @@
     let selected = new Set();       // "人の番号:部位:点の番号"
     let view = {zoom: 1, x: 0, y: 0};
     let viewAuto = true;            // 拡大・移動するまでは、画面の大きさが変わるたびに全体を表示し直す
-    let show = {hands: true, face: true, underlay: 0.5};
+    let show = {hands: true, face: true, underlay: 0.5, brush: 60};
+    let brush = false;              // 深度から消す範囲を塗るモード
+    let hover = null;               // 塗るモードで、筆の大きさを見せる位置（画面の座標）
     let underlay = null;            // 下敷きの画像 {img, name}
     let localImage = null;          // 読み込んだファイル（ファイルから選んだか、外からドロップした画像） {blob, url, name}
     let sourceValue = "";           // 下敷き・取り出し元。"" はなし、"::file" は読み込んだファイル、ほかはカット案の画像の名前
@@ -570,6 +597,13 @@
                         <label class="ps-pose-field" title="元の画像の形にどれだけ寄せるか（0〜2）。初期値 0.5。服や髪をもっと寄せたいときは 0.6〜0.8、元の画像に寄りすぎるときは 0.3 前後">重み<input type="number" class="ps-pose-depth-weight" min="0" max="2" step="0.05"></label>
                         <label class="ps-pose-field" title="生成のどの段階から深度を効かせるか（0〜1）。初期値 0。腕などを大きく動かして元の形が混ざるときは 0.3〜0.5 に上げます">開始<input type="number" class="ps-pose-depth-start" min="0" max="1" step="0.05"></label>
                         <label class="ps-pose-field" title="生成のどの段階まで深度を効かせるか（0〜1）。初期値 1。元の画像に寄りすぎるときは 0.6〜0.8 に下げます">終了<input type="number" class="ps-pose-depth-end" min="0" max="1" step="0.05"></label>
+                        <div class="ps-pose-subhead">深度から消す範囲（薄い赤）</div>
+                        <label class="ps-pose-range" title="動かした腕・手・脚の元の位置を自動で消す太さの倍率。初期値 1。袖や服が元の形のまま残るときは上げます">自動の太さ<input type="range" class="ps-pose-depth-grow" min="0.5" max="2.5" step="0.1"><span class="ps-pose-depth-grow-value"></span></label>
+                        <div class="ps-pose-row">
+                            <button type="button" class="mtm-btn ps-pose-brush" title="ドラッグで消す範囲を塗り足します。Shift を押しながらドラッグすると、消さない範囲を塗ります（自動の範囲も減らせます） (B)">🖌 塗る</button>
+                            <button type="button" class="mtm-btn ps-pose-brush-clear" title="手で塗った範囲を全部消します（自動の範囲はそのまま）">塗りを消す</button>
+                        </div>
+                        <label class="ps-pose-range">筆の太さ<input type="range" class="ps-pose-brush-size" min="10" max="300" step="5"><span class="ps-pose-brush-size-value"></span></label>
                         <details class="ps-pose-tips">
                             <summary>深度の重み・開始・終了の目安</summary>
                             <dl>
@@ -581,6 +615,8 @@
                                 <dd>元の画像に寄りすぎる、細部まで同じになるときは 0.6〜0.8 に下げます。</dd>
                                 <dt>はじめに試す組み合わせ</dt>
                                 <dd>ほぼ同じ姿勢で描き直す：重み 0.5・開始 0・終了 1。腕などを動かした：重み 0.4〜0.5・開始 0〜0.3・終了 1（動かした手足の元の位置は自動で消します）。</dd>
+                                <dt>消す範囲</dt>
+                                <dd>薄い赤の範囲は、元の画像を背景の色で塗ってから深度を作ります。袖や服の一部が残って、元の形のまま描かれるときは「自動の太さ」を上げるか、「🖌 塗る」（B）で塗り足します。Shift を押しながら塗ると、その部分は消さずに残します。</dd>
                             </dl>
                         </details>
                         <div class="ps-pose-note">ポーズを取り出した画像の奥行きを、もう 1 つのユニットに入れます。手の形や体の厚み、服や髪の形も元の画像に近づきます。ポーズのユニットと別の番号にしてください。深度の絵は生成のたびに ControlNet が作ります（重視はポーズと同じ）。</div>
@@ -613,6 +649,11 @@
         canvas.addEventListener("pointerup", pointerUp);
         canvas.addEventListener("pointercancel", pointerUp);
         canvas.addEventListener("dblclick", doubleClick);
+        canvas.addEventListener("pointerleave", () => {
+            if (!hover) return;
+            hover = null;
+            draw();
+        });
         canvas.addEventListener("contextmenu", (e) => e.preventDefault());
         canvas.addEventListener("wheel", wheel, {passive: false});
         new ResizeObserver(() => {
@@ -623,6 +664,10 @@
         root.addEventListener("keydown", keyDown);
         root.addEventListener("keyup", (e) => {
             if (e.code === "Space") spaceDown = false;
+            if (e.key === "Shift" && brush && hover && !drag) {
+                hover.keep = false;
+                draw();
+            }
         });
 
         q(".ps-pose-detect").addEventListener("click", detectFromSource);
@@ -712,7 +757,26 @@
             });
         }
         // 深度を使うかで、消す場所の表示が変わる
-        q(".ps-pose-depth-use").addEventListener("change", draw);
+        q(".ps-pose-depth-use").addEventListener("change", () => {
+            if (!q(".ps-pose-depth-use").checked) setBrush(false);
+            draw();
+        });
+        q(".ps-pose-depth-grow").addEventListener("input", () => {
+            changed = true;
+            q(".ps-pose-depth-grow-value").textContent = `× ${Number(q(".ps-pose-depth-grow").value).toFixed(1)}`;
+            draw();
+        });
+        q(".ps-pose-brush").addEventListener("click", () => setBrush(!brush));
+        q(".ps-pose-brush-clear").addEventListener("click", () => {
+            if (!model.paint.length) return;
+            edit(() => (model.paint = []));
+        });
+        q(".ps-pose-brush-size").addEventListener("input", () => {
+            show.brush = Number(q(".ps-pose-brush-size").value);
+            q(".ps-pose-brush-size-value").textContent = `${show.brush}px`;
+            saveView();
+            draw();
+        });
         for (const sel of [".ps-pose-unit", ".ps-pose-depth-unit"]) {
             for (let i = 0; i < 8; i++) q(sel).appendChild(new Option(`${i + 1} 番目`, String(i)));
         }
@@ -729,6 +793,20 @@
         try {
             localStorage.setItem(VIEW_KEY, JSON.stringify(show));
         } catch (e) { /* 覚えられなくても表示は変えられる */ }
+    }
+
+    // 深度から消す範囲を塗るモード。深度を使っていて、取り出し元の画像があるときだけ入れる
+    function setBrush(on) {
+        if (on && !(q(".ps-pose-depth-use").checked && model.source)) {
+            status("深度を使い、カット案の画像からポーズを取り出したときに塗れます");
+            on = false;
+        }
+        brush = on;
+        hover = null;
+        q(".ps-pose-brush").classList.toggle("mtm-active", brush);
+        canvasEl().style.cursor = brush ? "none" : "crosshair";
+        if (brush) status("ドラッグで消す範囲を塗ります。Shift を押しながらで、消さない範囲を塗ります（B か Esc で終わる）");
+        draw();
     }
 
     // 読み込んだファイルを取り出し元にする。detectNow が真なら、そのままポーズを取り出す
@@ -749,8 +827,15 @@
         const size = options.size || {};
         model = options.pose && Array.isArray(options.pose.people)
             ? fromJson(options.pose)
-            : {width: size.width || 512, height: size.height || 768, people: [], source: ""};
+            : {width: size.width || 512, height: size.height || 768, people: [], source: "", paint: []};
         control = withDefaults(options.control);
+        brush = false;
+        hover = null;
+        q(".ps-pose-brush").classList.remove("mtm-active");
+        q(".ps-pose-depth-grow").value = control.depth.grow;
+        q(".ps-pose-depth-grow-value").textContent = `× ${Number(control.depth.grow).toFixed(1)}`;
+        q(".ps-pose-brush-size").value = show.brush;
+        q(".ps-pose-brush-size-value").textContent = `${show.brush}px`;
         undoStack = [];
         redoStack = [];
         selected = new Set();
@@ -926,6 +1011,8 @@
                 model.height = next.height;
                 model.people = next.people;
                 model.source = v === "::file" ? "" : v;
+                // 塗った範囲は前の画像に合わせたものなので消す
+                model.paint = [];
             });
             selected = new Set();
             fit();
@@ -948,7 +1035,7 @@
     // ---------- 変更と元に戻す ----------
 
     function snapshot() {
-        return JSON.stringify({width: model.width, height: model.height, people: model.people, source: model.source});
+        return JSON.stringify({width: model.width, height: model.height, people: model.people, source: model.source, paint: model.paint});
     }
 
     function restore(s) {
@@ -957,6 +1044,7 @@
         model.height = v.height;
         model.people = v.people;
         model.source = v.source;
+        model.paint = v.paint || [];
         // 消えた点は選択から外す
         selected = new Set([...selected].filter((k) => pointOf(k)));
     }
@@ -1160,6 +1248,7 @@
                 model.height = next.height;
                 model.people = next.people;
                 model.source = "";
+                model.paint = [];
             });
             selected = new Set();
             fit();
@@ -1196,6 +1285,7 @@
                 weight: num(".ps-pose-depth-weight", 0, 2, 0.5),
                 start: depthStart,
                 end: Math.max(num(".ps-pose-depth-end", 0, 1, 1), depthStart),
+                grow: num(".ps-pose-depth-grow", 0.5, 2.5, 1),
             },
         };
     }
@@ -1244,6 +1334,42 @@
         });
     }
 
+    // 深度から消す範囲（自動の範囲と塗った範囲から、消さない範囲を引いたもの）を、別の板に描いてから薄く重ねる
+    let overlayCanvas = null;
+    function drawEraseOverlay(ctx) {
+        const W = model.width;
+        const H = model.height;
+        // 板は画像の長い辺を 1024 px までに縮める（重ならないよう 1 枚に描いてから重ねる）
+        const k = Math.min(1, 1024 / Math.max(W, H));
+        if (!overlayCanvas) overlayCanvas = document.createElement("canvas");
+        const oc = overlayCanvas;
+        oc.width = Math.max(1, Math.round(W * k));
+        oc.height = Math.max(1, Math.round(H * k));
+        const g = oc.getContext("2d");
+        g.setTransform(k, 0, 0, k, 0, 0);
+        g.lineCap = "round";
+        g.strokeStyle = "#ff3b3b";
+        const short = Math.min(W, H);
+        const areas = eraseAreas(toJson(model, false), Number(q(".ps-pose-depth-grow").value) || 1);
+        for (const keep of [false, true]) {
+            g.globalCompositeOperation = keep ? "destination-out" : "source-over";
+            for (const e of areas) {
+                if (!!e.keep !== keep) continue;
+                const ax = e.a[0] * W, ay = e.a[1] * H;
+                const bx = e.b[0] * W, by = e.b[1] * H;
+                g.lineWidth = e.w * short;
+                g.beginPath();
+                g.moveTo(ax, ay);
+                g.lineTo(bx + (ax === bx && ay === by ? 0.01 : 0), by);
+                g.stroke();
+            }
+        }
+        ctx.save();
+        ctx.globalAlpha = 0.4;
+        ctx.drawImage(oc, 0, 0, W, H);
+        ctx.restore();
+    }
+
     function draw() {
         if (!root || !model || !isOpen()) return;
         const canvas = canvasEl();
@@ -1271,23 +1397,7 @@
         }
         drawPose(ctx, model, show);
         // 深度を使うときは、深度から消す場所（動かした手足の元の位置）を薄い赤で見せる
-        if (q(".ps-pose-depth-use").checked && model.source) {
-            ctx.save();
-            ctx.globalAlpha = 0.35;
-            ctx.strokeStyle = ctx.fillStyle = "#ff3b3b";
-            ctx.lineCap = "round";
-            const short = Math.min(model.width, model.height);
-            for (const e of eraseAreas(toJson(model, false))) {
-                const ax = e.a[0] * model.width, ay = e.a[1] * model.height;
-                const bx = e.b[0] * model.width, by = e.b[1] * model.height;
-                ctx.lineWidth = e.w * short;
-                ctx.beginPath();
-                ctx.moveTo(ax, ay);
-                ctx.lineTo(bx + (ax === bx && ay === by ? 0.01 : 0), by);
-                ctx.stroke();
-            }
-            ctx.restore();
-        }
+        if (q(".ps-pose-depth-use").checked && model.source) drawEraseOverlay(ctx);
         // つかむ印（画面の座標で描く）
         ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
         ctx.strokeStyle = "rgba(255,255,255,0.35)";
@@ -1327,6 +1437,14 @@
             ctx.beginPath();
             ctx.arc(k.x, k.y, KNOB, 0, Math.PI * 2);
             ctx.fill();
+            ctx.stroke();
+            ctx.lineWidth = 1;
+        }
+        if (brush && hover) {
+            ctx.strokeStyle = hover.keep ? "#4ade80" : "#ff6b6b";
+            ctx.lineWidth = 1.5;
+            ctx.beginPath();
+            ctx.arc(hover.x, hover.y, Math.max(2, (show.brush / 2) * view.zoom), 0, Math.PI * 2);
             ctx.stroke();
             ctx.lineWidth = 1;
         }
@@ -1422,6 +1540,16 @@
             return;
         }
         if (e.button !== 0) return;
+        // 塗るモード：消す範囲（Shift なら消さない範囲）を塗る
+        if (brush) {
+            pushUndo();
+            const p = toCanvas(x, y);
+            const stroke = {mode: e.shiftKey ? "keep" : "erase", w: show.brush, pts: [{x: p.x, y: p.y}]};
+            model.paint.push(stroke);
+            drag = {type: "paint", stroke};
+            draw();
+            return;
+        }
         const knob = knobAt(x, y);
         if (knob) {
             const pts = model.people[knob.pi][knob.side];
@@ -1451,11 +1579,22 @@
 
     function pointerMove(e) {
         const {x, y} = localPos(e);
+        if (brush) hover = {x, y, keep: drag && drag.type === "paint" ? drag.stroke.mode === "keep" : e.shiftKey};
         if (!drag) {
+            if (brush) {
+                canvasEl().style.cursor = spaceDown ? "grab" : "none";
+                draw();
+                return;
+            }
             canvasEl().style.cursor = spaceDown || knobAt(x, y) ? "grab" : hitTest(x, y) ? "pointer" : "crosshair";
             return;
         }
-        if (drag.type === "pan") {
+        if (drag.type === "paint") {
+            const p = toCanvas(x, y);
+            const last = drag.stroke.pts[drag.stroke.pts.length - 1];
+            // 筆の太さの 1/5 ほど動いたら点を足す（点を増やしすぎない）
+            if (Math.hypot(p.x - last.x, p.y - last.y) >= Math.max(2, drag.stroke.w * 0.2)) drag.stroke.pts.push({x: p.x, y: p.y});
+        } else if (drag.type === "pan") {
             view.x = drag.vx + (x - drag.sx);
             view.y = drag.vy + (y - drag.sy);
         } else if (drag.type === "move") {
@@ -1561,6 +1700,7 @@
     }
 
     function doubleClick(e) {
+        if (brush) return;
         const {x, y} = localPos(e);
         if (knobAt(x, y)) return;
         // 鼻・目・手首は顔や手の点と重なりやすいので、届く範囲に体の点があればそれを、次に手の点を選ぶ
@@ -1599,7 +1739,9 @@
         const ctrl = e.ctrlKey || e.metaKey;
         let handled = true;
         if (e.key === "Escape") {
-            if (selected.size) {
+            if (brush) {
+                setBrush(false);
+            } else if (selected.size) {
                 selected = new Set();
                 updateUi();
                 draw();
@@ -1623,6 +1765,11 @@
             draw();
         } else if (e.key === "Delete" || e.key === "Backspace") {
             setVisible(e.shiftKey);
+        } else if (e.key.toLowerCase() === "b" && !ctrl && !e.altKey) {
+            setBrush(!brush);
+        } else if (e.key === "Shift" && brush && hover) {
+            hover.keep = true;
+            draw();
         } else if (e.key.toLowerCase() === "h" && !ctrl) {
             flipHands();
         } else if ((e.key.toLowerCase() === "q" || e.key.toLowerCase() === "e") && !ctrl) {
