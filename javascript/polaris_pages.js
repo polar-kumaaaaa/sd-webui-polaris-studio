@@ -26,7 +26,6 @@
         hline: "ドラッグで、手で引いたように揺れる線を引きます。Shift で水平・垂直。太さ・揺れ・色・フチは下の行で、🎲 で別の揺れ方にします。引いた線は「選択」で両端を動かせます。",
         rect: "ドラッグで四角を描きます。Shift で正方形。線「なし」にすると透明な四角（線のないコマ）になります。台形や平行四辺形は、四角を選んで「頂点を編集」(E) で角を動かして作ります。",
         tri: "ドラッグで三角を描きます（ドラッグした枠の上の辺の真ん中が頂点。上へドラッグすると逆向き）。Shift で幅と高さをそろえます。描いたあとは「頂点を編集」(E) で角を動かせます。",
-        text: "クリックした所にセリフを置き、文字を入力します（Ctrl+Enter で決定、Esc で取り消し）。置いたセリフをクリックすると文字を直せます。フォント・大きさ・縦書き/横書きなどは下の行で。動かすのは「選択」で。",
     };
 
     const el = (...args) => window.PolarisStudio.el(...args);
@@ -109,6 +108,7 @@
     let clipSeq = 0;
 
     // ---------- セリフ（文字）の組み方（サーバーの layout_text と同じ） ----------
+    // セリフの道具はなくしたが、前に置いたセリフを表示するのに使う
     // 縦書きは 1 文字ずつ、文字の大きさの升目に並べる。右の行から左へ。改行で次の行。
     //   - 「ー」「（」「」」などは 90° 回して置く。「、」「。」は升目の右上に、小さい「っ」などは少し右上に寄せる
     //   - 半角の数字・!・? が 2 文字までのときは、横に並べて 1 升に入れる（縦中横）。升目に入らなければ縮める
@@ -119,24 +119,17 @@
     const TEXT_CORNER = "、。，．､｡,.";
     const TEXT_SMALL = "ぁぃぅぇぉっゃゅょゎゕゖァィゥェォッャュョヮヵヶ";
     const TEXT_TCY = "0123456789!?";
-    const TEXT_DEFAULT = {font: "", size: 36, vertical: true, lineHeight: 1.5, spacing: 0, color: "#000000", outline: 0, outlineColor: "#ffffff"};
-    const TEXT_SIZE = [8, 1000];
-    const TEXT_LINE = [1, 4];
-    const TEXT_SPACING = [-0.5, 2];
-    const OUTLINES = [0, 2, 4, 6, 8, 12, 16, 24];
     // フォント選びの絞り込み [キー, 表示, 説明]
     const FONT_FILTERS = [
         ["all", "すべて", "この PC のすべてのフォント"],
         ["added", "追加したフォント", "Windows の個人用のフォント（右クリック →「インストール」で入れたフォント）と、拡張フォルダの data/fonts/ のフォント。「すべてのユーザーに対してインストール」で入れたフォントは、Windows に最初からあるフォントと見分けられないので出ません（★ を付けてください）"],
         ["fav", "★ お気に入り", "★ を付けたフォント"],
-        ["recent", "最近使った", "最近セリフに使ったフォント（新しい順）"],
+        ["recent", "最近使った", "最近使ったフォント（新しい順）"],
     ];
     const FONT_RECENT_MAX = 12;
     const FONT_FAV_MAX = 1000;
-    // 新しく置くセリフに使うフォント（一覧にあれば、この順に選ぶ）
-    const FONT_PREFERRED = ["win:YuGothB.ttc#0", "win:YuGothM.ttc#0", "win:meiryo.ttc#0", "win:msgothic.ttc#0"];
-    // オノマトペの最初のフォント（太いものから）
-    const SFX_FONT_PREFERRED = ["win:HGRSGU.TTC#0", "win:YuGothB.ttc#0", "win:meiryob.ttc#0", ...FONT_PREFERRED];
+    // オノマトペの最初のフォント（一覧にあれば、この順に選ぶ。太いものから）
+    const SFX_FONT_PREFERRED = ["win:HGRSGU.TTC#0", "win:YuGothB.ttc#0", "win:meiryob.ttc#0", "win:YuGothM.ttc#0", "win:meiryo.ttc#0", "win:msgothic.ttc#0"];
 
     const fontFaces = new Map();    // フォントの id → ブラウザに読み込んだときの名前
     let measureCtx = null;
@@ -242,12 +235,6 @@
     function textBox(s) {
         const lay = layoutText(s, fontFamily(s.font));
         return {x: s.x + s.w / 2 - lay.w / 2, y: s.y + s.h / 2 - lay.h / 2, w: lay.w, h: lay.h, lay};
-    }
-
-    // 文字や書式を変えたら、枠の中心を保って枠を組み直す
-    function fitText(s) {
-        const b = textBox(s);
-        Object.assign(s, {x: round1(b.x), y: round1(b.y), w: round1(b.w), h: round1(b.h)});
     }
 
     // フチは全部の字のフチを先に描いてから字を描く（隣の字のフチが字に掛からないように。サーバーと同じ）
@@ -416,7 +403,7 @@
         return (h >>> 0).toString(36) + text.length.toString(36);
     }
 
-    // 手描き線の書式を範囲に収める（isColor はセリフの書式と共通）
+    // 手描き線の書式を範囲に収める
     function cleanHlineStyle(o) {
         const num = (v, [lo, hi], d) => (typeof v === "number" && isFinite(v) ? clamp(Math.round(v), lo, hi) : d);
         return {
@@ -602,12 +589,11 @@
     // cropMode: 新しくはめ込むときの置き方。"cover" は拡大して合わせる、"full" は原寸
     // favOnly は画像選択の「お気に入りのみ」
     // count は編集画面に並べるコマページの枚数（1〜3）
-    // text はこれから置くセリフの書式（最後に使った書式）
     // fontFavorites は ★ を付けたフォント、fontRecent は最近使ったフォント（新しい順）、fontFilter はフォント選びの絞り込み
-    const prefs = {tool: "rect", line: 4, rect: 4, cropMode: "cover", favOnly: false, count: 1, text: {...TEXT_DEFAULT},
+    const prefs = {tool: "rect", line: 4, rect: 4, cropMode: "cover", favOnly: false, count: 1,
         fontFavorites: [], fontRecent: [], fontFilter: "all",
         // オノマトペ：パレットを開いているか、文字列のスタンプのフォント・大きさ、置くたびに形を変えるか
-        sfxOpen: false, sfxFont: "", sfxSize: 140, sfxVary: true,
+        sfxOpen: false, sfxFont: "", sfxSize: 140, sfxVary: true, sfxAlign: false,
         // オノマトペの調整で、フォント別の見本の枠を開いているか
         sfxFontsOpen: false,
         // フォント別の見本の枠をピンで固定しているか（オノマトペを選んでいないときも出しておく）
@@ -629,9 +615,8 @@
     function loadPrefs() {
         try {
             const saved = JSON.parse(localStorage.getItem(PREFS_KEY) || "{}");
-            if (["select", "line", "hline", "rect", "tri", "text"].includes(saved.tool)) prefs.tool = saved.tool;
+            if (["select", "line", "hline", "rect", "tri"].includes(saved.tool)) prefs.tool = saved.tool;
             if (saved.hline && typeof saved.hline === "object") prefs.hline = cleanHlineStyle(saved.hline);
-            if (saved.text && typeof saved.text === "object") prefs.text = cleanTextStyle(saved.text);
             const ids = (v, max) => (Array.isArray(v) ? [...new Set(v.filter((x) => typeof x === "string" && x))].slice(0, max) : []);
             prefs.fontFavorites = ids(saved.fontFavorites, FONT_FAV_MAX);
             prefs.fontRecent = ids(saved.fontRecent, FONT_RECENT_MAX);
@@ -645,6 +630,7 @@
             if (typeof saved.sfxFont === "string") prefs.sfxFont = saved.sfxFont;
             if (isNum(saved.sfxSize)) prefs.sfxSize = clamp(Math.round(saved.sfxSize), 8, 2000);
             prefs.sfxVary = saved.sfxVary !== false;
+            prefs.sfxAlign = saved.sfxAlign === true;
             prefs.sfxFontsOpen = saved.sfxFontsOpen === true;
             prefs.sfxFontsPinned = saved.sfxFontsPinned === true;
         } catch (e) { /* 覚えていなくても既定で使える */ }
@@ -684,7 +670,6 @@
                     <button type="button" class="mtm-btn" data-tool="hline" title="手描き線 (W)。ドラッグで、手で引いたように揺れる線を引きます">手描き線</button>
                     <button type="button" class="mtm-btn" data-tool="rect" title="四角 (R)">四角</button>
                     <button type="button" class="mtm-btn" data-tool="tri" title="三角 (Y)">三角</button>
-                    <button type="button" class="mtm-btn" data-tool="text" title="セリフ (T)。クリックした所に文字を置きます">セリフ</button>
                 </div>
                 <div class="ps-pg-group ps-pg-strokes">
                     <span class="ps-pg-label">線の太さ</span>
@@ -712,26 +697,6 @@
                 </label>
                 <button type="button" class="mtm-btn ps-pg-resize" title="キャンバスの大きさを変えます。置いた図形はそのままの位置に残ります">変更</button>
             </div>
-            <div class="ps-pg-tools ps-pg-textbar ps-off" title="選んだセリフ（なければ、これから置くセリフ）の書式">
-                <span class="ps-pg-label">セリフ</span>
-                <button type="button" class="mtm-btn ps-pg-font" title="フォントを選びます。この PC に入っているフォントを使えます（書き出しにも同じ字形で入ります）"></button>
-                <label class="ps-pg-size">大きさ <input type="number" class="ps-pg-tsize" min="${TEXT_SIZE[0]}" max="${TEXT_SIZE[1]}" step="1" title="文字の大きさ（ページのピクセル）"></label>
-                <span class="ps-pg-group">
-                    <button type="button" class="mtm-btn" data-dir="v" title="縦書き">縦書き</button>
-                    <button type="button" class="mtm-btn" data-dir="h" title="横書き">横書き</button>
-                </span>
-                <label class="ps-pg-size">行間 <input type="number" class="ps-pg-tline" min="${TEXT_LINE[0]}" max="${TEXT_LINE[1]}" step="0.1" title="行の送り（文字の大きさの何倍か）"></label>
-                <label class="ps-pg-size">字間 <input type="number" class="ps-pg-tspace" min="${TEXT_SPACING[0]}" max="${TEXT_SPACING[1]}" step="0.05" title="字と字の間（文字の大きさに対する割合。0 で詰めずに並べる）"></label>
-                <label class="ps-pg-size">色 <input type="color" class="ps-pg-tcolor" title="文字の色"></label>
-                <label class="ps-pg-size">フチ
-                    <select class="ps-pg-toutline" title="文字のフチの太さ（ピクセル）。絵の上に直接置く文字に">${OUTLINES.map((w) => `<option value="${w}">${w ? w + " px" : "なし"}</option>`).join("")}</select>
-                    <input type="color" class="ps-pg-toutcolor" title="フチの色">
-                </label>
-                <span class="ps-pg-group ps-pg-tballoon">
-                    <button type="button" class="mtm-btn ps-pg-balloon-toggle" title="選んだセリフに四角い吹き出しを付ける・外す (B)。吹き出しの大きさは、菱形のつまみで文字とは別に変えられます">□ 吹き出し</button>
-                    <select class="ps-pg-balloon-stroke" title="吹き出しの線の太さ">${BALLOON_STROKES.map((w) => `<option value="${w}">線 ${w} px</option>`).join("")}</select>
-                </span>
-            </div>
             <div class="ps-pg-tools ps-pg-hlinebar ps-off" title="選んだ手描き線（なければ、これから引く線）の書式">
                 <span class="ps-pg-label">手描き線</span>
                 <label class="ps-pg-size">太さ <input type="number" class="ps-pg-hwidth" min="${HLINE_WIDTH[0]}" max="${HLINE_WIDTH[1]}" step="1" title="線のいちばん太い所の太さ（ページのピクセル）"></label>
@@ -755,7 +720,7 @@
             </div>
             <div class="ps-pg-fontpicker ps-off">
                 <div class="ps-pg-fontpicker-head">
-                    <input type="search" class="ps-pg-fontsearch" placeholder="名前で検索（↑↓ で試す、Enter で決める、Esc で戻す）" title="↑↓ キーでフォントを順に試せます（選んだオノマトペやセリフにすぐ当たります）。Enter で決め、Esc で試す前のフォントに戻します。検索のあとすぐ Enter なら一番上を選びます">
+                    <input type="search" class="ps-pg-fontsearch" placeholder="名前で検索（↑↓ で試す、Enter で決める、Esc で戻す）" title="↑↓ キーでフォントを順に試せます（選んだオノマトペにすぐ当たります）。Enter で決め、Esc で試す前のフォントに戻します。検索のあとすぐ Enter なら一番上を選びます">
                     <button type="button" class="mtm-icon ps-pg-fontpicker-close" title="閉じる (Esc)">✕</button>
                 </div>
                 <div class="ps-pg-group ps-pg-fontfilters">
@@ -765,13 +730,6 @@
                 <div class="ps-pg-fontlist"></div>
             </div>
             <div class="ps-pg-hint"></div>
-            <div class="ps-pg-textedit ps-off">
-                <textarea class="ps-pg-textarea" rows="3" placeholder="セリフを入力（改行で次の行）。Ctrl+Enter で決定、Esc で取り消し"></textarea>
-                <div class="ps-pg-textedit-actions">
-                    <button type="button" class="mtm-btn ps-pg-text-cancel">キャンセル</button>
-                    <button type="button" class="mtm-btn mtm-primary ps-pg-text-ok">決定</button>
-                </div>
-            </div>
             <div class="ps-pg-body">
                 <div class="ps-pg-stage"></div>
                 <div class="ps-pg-fontside ps-off">
@@ -800,6 +758,7 @@
                                 <label title="文字列のスタンプの字の大きさ（ページのピクセル）">大きさ <input type="number" class="ps-pg-sfx-newsize" min="8" max="2000" step="1"></label>
                             </div>
                             <label class="ps-pg-sfx-check" title="オフにすると、同じスタンプは同じ形で置きます"><input type="checkbox" class="ps-pg-sfx-vary"> 置くたびに形を変える（ゆらぎ）</label>
+                            <label class="ps-pg-sfx-check" title="ゆらがせず、升目にそろえた縦書きで置きます（セリフの代わり）。置いたあと、調整の「≡ 整列」で外したり、横書きにしたりできます"><input type="checkbox" class="ps-pg-sfx-align-new"> 整列して縦書きで置く</label>
                             <div class="ps-pg-sfx-label">文字列
                                 <span class="mtm-fs-spacer"></span>
                                 <button type="button" class="mtm-btn ps-pg-sfx-edit" title="文字列をまとめて編集します（1 行に 1 つ）">編集</button>
@@ -918,7 +877,6 @@
             const hit = e.target.closest("[data-id]");
             const s = hit && shapeOf(hit.dataset.id);
             if (s && s.type === "rect") openPicker(s);
-            if (s && s.type === "text" && !textEdit) startTextEdit(s, null);
         });
         new ResizeObserver(() => {
             if (ed) render();
@@ -930,34 +888,19 @@
             wheelPage(e);
         }, {passive: false});
         buildMaterials();
-        buildText();
+        buildBars();
         buildSfx();
         buildCrop();
     }
 
-    // ---------- セリフの編集 ----------
-    // 「セリフ」の道具でクリックした所に置き、上の入力欄で文字を入れる。入力中はその場で描き直し、決定で 1 回の変更として保存する
+    // ---------- フォント ----------
+    // セリフの道具はなくした（オノマトペの「整列」が代わり）。前に置いたセリフは、表示・移動・削除・書き出しだけできる
 
     let fontList = null;        // [{id, name, style}]。読み込み前は null
     let fontsLoading = false;
-    let textEdit = null;        // 入力中のセリフ {id, before}
 
     const isNum = (v) => typeof v === "number" && Number.isFinite(v);
     const isColor = (v) => typeof v === "string" && /^#[0-9a-f]{6}$/i.test(v);
-
-    function cleanTextStyle(t) {
-        const d = TEXT_DEFAULT;
-        return {
-            font: typeof t.font === "string" ? t.font : d.font,
-            size: isNum(t.size) ? clamp(t.size, ...TEXT_SIZE) : d.size,
-            vertical: t.vertical !== false,
-            lineHeight: isNum(t.lineHeight) ? clamp(t.lineHeight, ...TEXT_LINE) : d.lineHeight,
-            spacing: isNum(t.spacing) ? clamp(t.spacing, ...TEXT_SPACING) : d.spacing,
-            color: isColor(t.color) ? t.color.toLowerCase() : d.color,
-            outline: OUTLINES.includes(t.outline) ? t.outline : d.outline,
-            outlineColor: isColor(t.outlineColor) ? t.outlineColor.toLowerCase() : d.outlineColor,
-        };
-    }
 
     // フォントの一覧は最初に編集画面を開いたときに 1 回だけ読む
     async function loadFonts() {
@@ -974,12 +917,8 @@
         }
         fontsLoading = false;
         const ids = new Set(fontList.map((f) => f.id));
-        if (!ids.has(prefs.text.font)) {
-            prefs.text.font = FONT_PREFERRED.find((id) => ids.has(id)) || (fontList[0] ? fontList[0].id : "");
-            savePrefs();
-        }
         if (!ids.has(prefs.sfxFont)) {
-            prefs.sfxFont = SFX_FONT_PREFERRED.find((id) => ids.has(id)) || prefs.text.font;
+            prefs.sfxFont = SFX_FONT_PREFERRED.find((id) => ids.has(id)) || (fontList[0] ? fontList[0].id : "");
             savePrefs();
         }
         if (ed) updateTools();
@@ -1007,7 +946,6 @@
 
     function buildFontPicker() {
         const picker = q(".ps-pg-fontpicker");
-        q(".ps-pg-font").addEventListener("click", (e) => (isFontPickerOpen() ? closeFontPicker() : openFontPicker(e.currentTarget, "text")));
         q(".ps-pg-fontpicker-close").addEventListener("click", closeFontPicker);
         q(".ps-pg-fontsearch").addEventListener("input", () => {
             fontCursor = false;
@@ -1038,12 +976,12 @@
         }));
         // 外を押したら閉じる
         view.addEventListener("mousedown", (e) => {
-            if (isFontPickerOpen() && !picker.contains(e.target) && !e.target.closest(".ps-pg-font, [data-font-target]")) closeFontPicker();
+            if (isFontPickerOpen() && !picker.contains(e.target) && !e.target.closest("[data-font-target]")) closeFontPicker();
         }, true);
     }
 
-    // target はフォントを決める先。"text"（セリフ）、"sfx-new"（文字列のスタンプ）、"sfx"（選んだオノマトペ）
-    let fontTarget = "text";
+    // target はフォントを決める先。"sfx-new"（文字列のスタンプ）か "sfx"（選んだオノマトペ）
+    let fontTarget = "sfx";
 
     // 上下キーでフォントを次々に試す。試している間は描き直すだけにし、閉じたときに 1 回の変更にする（元に戻すで、試す前に戻る）
     let fontCursor = false;     // 検索のあとに上下キーで選んだか（Enter でそれに決める）
@@ -1064,7 +1002,7 @@
 
     function tryFont(id) {
         if (!fontBrowse) {
-            fontBrowse = {before: textEdit || fontTarget === "sfx-new" ? null : snapshot(), orig: currentFont(), id};
+            fontBrowse = {before: fontTarget === "sfx-new" ? null : snapshot(), orig: currentFont(), id};
         }
         fontBrowse.id = id;
         applyFontLive(id);
@@ -1083,16 +1021,6 @@
             s.params = SFX().clean(s.params);
             if (!SFX().fit(s)) sfxPending.add(s.id);
             render();
-        } else {
-            prefs.text.font = id;
-            savePrefs();
-            if (s && s.type === "text") {
-                s.font = id;
-                fitText(s);
-                render();
-            } else {
-                updateTools();
-            }
         }
     }
 
@@ -1135,16 +1063,14 @@
         if (!view || !isFontPickerOpen()) return;
         finishFontBrowse(keep !== false);
         q(".ps-pg-fontpicker").classList.add("ps-off");
-        if (textEdit) q(".ps-pg-textarea").focus();
-        else refocus();
+        refocus();
     }
 
-    // いま書式を見ているセリフ（選んでいるセリフ、なければこれから置くセリフ）のフォント
+    // いまフォントを選んでいる先のフォント
     function currentFont() {
         const s = ed && selected();
         if (fontTarget === "sfx-new") return prefs.sfxFont;
-        if (fontTarget === "sfx") return s && s.type === "sfx" ? s.params.font : "";
-        return s && s.type === "text" ? s.font : prefs.text.font;
+        return s && s.type === "sfx" ? s.params.font : "";
     }
 
     function renderFontList() {
@@ -1175,7 +1101,7 @@
                 : {
                     added: "追加したフォントがありません。フォントのファイルを右クリック →「インストール」で入れるか、拡張フォルダの data/fonts/ に置くと出ます（reForge の再起動が必要です）。",
                     fav: "★ を付けたフォントがありません。一覧の ☆ を押すと付けられます。",
-                    recent: "まだセリフにフォントを使っていません。",
+                    recent: "まだフォントを使っていません。",
                 }[filter] || "フォントが見つかりません。";
             box.appendChild(el("div", {class: "mtm-empty", text: empty}));
             return;
@@ -1227,38 +1153,12 @@
             renderSfxPalette();
         } else if (fontTarget === "sfx") {
             editSfx((p) => (p.font = id), true);
-        } else {
-            setTextStyle("font", id);
         }
     }
 
-    function buildText() {
-        const ta = q(".ps-pg-textarea");
-        ta.addEventListener("input", () => {
-            const s = textEdit && shapeOf(textEdit.id);
-            if (!s) return;
-            s.text = ta.value;
-            fitText(s);
-            render();
-        });
-        q(".ps-pg-text-ok").addEventListener("click", () => finishTextEdit(true));
-        q(".ps-pg-text-cancel").addEventListener("click", () => finishTextEdit(false));
-        const num = (sel, key, range) => q(sel).addEventListener("change", (e) => {
-            const v = Number(e.target.value);
-            if (e.target.value === "" || !Number.isFinite(v)) {
-                updateTools();
-                return;
-            }
-            setTextStyle(key, clamp(Math.round(v * 100) / 100, ...range));
-        });
-        num(".ps-pg-tsize", "size", TEXT_SIZE);
-        num(".ps-pg-tline", "lineHeight", TEXT_LINE);
-        num(".ps-pg-tspace", "spacing", TEXT_SPACING);
+    // 書式の行（手描き線）とフォント選び
+    function buildBars() {
         buildFontPicker();
-        q(".ps-pg-toutline").addEventListener("change", (e) => setTextStyle("outline", Number(e.target.value)));
-        q(".ps-pg-tcolor").addEventListener("change", (e) => setTextStyle("color", e.target.value.toLowerCase()));
-        q(".ps-pg-toutcolor").addEventListener("change", (e) => setTextStyle("outlineColor", e.target.value.toLowerCase()));
-        view.querySelectorAll("[data-dir]").forEach((b) => b.addEventListener("click", () => setTextStyle("vertical", b.dataset.dir === "v")));
         // 手描き線の書式
         const hnum = (sel, key, range) => q(sel).addEventListener("change", (e) => {
             const v = Number(e.target.value);
@@ -1286,17 +1186,6 @@
         q(".ps-pg-htaper-in").addEventListener("change", (e) => setHlineStyle("taperIn", e.target.checked));
         q(".ps-pg-htaper-out").addEventListener("change", (e) => setHlineStyle("taperOut", e.target.checked));
         q(".ps-pg-hreroll").addEventListener("click", () => rerollHline());
-        q(".ps-pg-balloon-toggle").addEventListener("click", () => toggleBalloon());
-        q(".ps-pg-balloon-stroke").addEventListener("change", (e) => {
-            setBalloonStroke(Number(e.target.value));
-            refocus();
-        });
-        // 数値の欄で Enter を押したら決める（キャンバスの操作に戻る）
-        for (const sel of [".ps-pg-tsize", ".ps-pg-tline", ".ps-pg-tspace"]) {
-            q(sel).addEventListener("keydown", (e) => {
-                if (e.key === "Enter" && !e.isComposing) e.target.blur();
-            });
-        }
     }
 
     // 手描き線の書式を変える。選んだ線があればそれに、なければこれから引く線に効く（どちらでも次に引く線の書式として覚える）
@@ -1334,107 +1223,6 @@
         // くねらせないときは、始まりと波を薄くする
         q(".ps-pg-hsnake").classList.toggle("ps-pg-hsnake-off", !t.snake);
         q(".ps-pg-hreroll").disabled = !placed;
-    }
-
-    // 書式を変える。選んだセリフがあればそれに、なければこれから置くセリフに効く（どちらでも次に置くセリフの書式として覚える）
-    function setTextStyle(key, value) {
-        prefs.text[key] = value;
-        savePrefs();
-        const s = selected();
-        if (s && s.type === "text") {
-            if (textEdit && textEdit.id === s.id) {
-                // 入力中は、決定したときにまとめて 1 回の変更にする
-                s[key] = value;
-                fitText(s);
-                render();
-            } else {
-                change(() => {
-                    s[key] = value;
-                    fitText(s);
-                });
-            }
-        } else {
-            updateTools();
-        }
-        if (textEdit) q(".ps-pg-textarea").focus();
-    }
-
-    function fillTextBar(t) {
-        const set = (sel, v) => {
-            const input = q(sel);
-            if (document.activeElement !== input) input.value = v;
-        };
-        // 一覧にないフォント（ほかの PC で選んだものなど）は「見つからないフォント」と出す
-        const button = q(".ps-pg-font");
-        button.textContent = fontName(t.font) + " ▾";
-        button.title = `フォントを選びます（${t.font || "既定"}）。書き出しにも同じ字形で入ります`;
-        set(".ps-pg-tsize", t.size);
-        set(".ps-pg-tline", t.lineHeight);
-        set(".ps-pg-tspace", t.spacing);
-        set(".ps-pg-tcolor", t.color);
-        set(".ps-pg-toutline", String(t.outline));
-        set(".ps-pg-toutcolor", t.outlineColor);
-        view.querySelectorAll("[data-dir]").forEach((b) => b.classList.toggle("mtm-active", (b.dataset.dir === "v") === t.vertical));
-        // 吹き出しは置いたセリフにだけ付けられる（これから置くセリフの書式にはない）
-        const placed = t.type === "text";
-        q(".ps-pg-tballoon").classList.toggle("ps-off", !placed);
-        if (placed) {
-            q(".ps-pg-balloon-toggle").classList.toggle("mtm-active", !!t.balloon);
-            const stroke = q(".ps-pg-balloon-stroke");
-            stroke.classList.toggle("ps-off", !t.balloon);
-            if (t.balloon && document.activeElement !== stroke) stroke.value = String(t.balloon.stroke);
-        }
-    }
-
-    // p（ページのピクセル）を中心に、空のセリフを置いて入力を始める
-    function createText(p) {
-        const before = snapshot();
-        const s = {id: newId(), type: "text", x: p.x, y: p.y, w: 0, h: 0, text: "", ...cleanTextStyle(prefs.text)};
-        fitText(s);
-        ed.page.shapes.push(s);
-        ed.sel = s.id;
-        useFont(s.font);
-        startTextEdit(s, before);
-    }
-
-    function startTextEdit(s, before) {
-        if (textEdit) finishTextEdit(true);
-        if (drag) cancelDrag();
-        textEdit = {id: s.id, before: before || snapshot()};
-        ed.sel = s.id;
-        const ta = q(".ps-pg-textarea");
-        ta.value = s.text;
-        q(".ps-pg-textedit").classList.remove("ps-off");
-        render();
-        ta.focus();
-        ta.setSelectionRange(ta.value.length, ta.value.length);
-    }
-
-    // accept なら決定（字が空ならセリフごと消す）、そうでなければ入力を始める前に戻す
-    function finishTextEdit(accept) {
-        const t = textEdit;
-        if (!t) return;
-        textEdit = null;
-        q(".ps-pg-textedit").classList.add("ps-off");
-        if (!ed) return;
-        if (!accept) {
-            restoreSilently(t.before);
-            render();
-            refocus();
-            return;
-        }
-        const s = shapeOf(t.id);
-        if (s && !s.text.trim()) {
-            ed.page.shapes = ed.page.shapes.filter((x) => x !== s);
-            ed.sel = null;
-        }
-        if (snapshot() !== t.before) {
-            pushUndo(t.before);
-            commit();
-        } else {
-            render();
-        }
-        refocus();
     }
 
     // ---------- 素材（吹き出し・集中線・小物など） ----------
@@ -1525,7 +1313,6 @@
                 savePrefs();
             }
             if (drag) cancelDrag();
-            finishTextEdit(true);
             change(() => {
                 page.shapes.push(s);
                 ed.sel = s.id;
@@ -1573,6 +1360,7 @@
             ["sizeStart", "始めの大きさ", 10, 300, 1, "%", "最初の字の大きさ。間はなめらかに変わります"],
             ["sizeEnd", "終わりの大きさ", 10, 300, 1, "%", "最後の字の大きさ"],
             ["spacing", "字間", -60, 150, 1, "%", "字と字の間（字の大きさに対する割合）"],
+            ["lineHeight", "行間", 100, 300, 5, "%", "整列のとき、行と行の間隔（字の大きさに対する割合。100 % で行がくっつく）"],
             ["rise", "傾き", -90, 90, 1, "°", "全体の傾き。プラスで右上がり"],
             ["italic", "斜体", -45, 45, 1, "°", "字を斜めに倒します"],
             ["curve", "曲がり", -100, 100, 1, "%", "並びを弓なりに曲げます。プラスで真ん中がふくらみます"],
@@ -1642,6 +1430,11 @@
             prefs.sfxVary = e.target.checked;
             savePrefs();
         });
+        q(".ps-pg-sfx-align-new").addEventListener("change", (e) => {
+            prefs.sfxAlign = e.target.checked;
+            savePrefs();
+            if (stampSource && stampSource.kind === "word") startStamp("word", stampSource.id);
+        });
         q(".ps-pg-sfx-edit").addEventListener("click", () => startWordEdit());
         q(".ps-pg-sfx-edit-cancel").addEventListener("click", () => finishWordEdit(false));
         q(".ps-pg-sfx-edit-ok").addEventListener("click", () => finishWordEdit(true));
@@ -1689,7 +1482,7 @@
 
     function buildSfxDetail() {
         const box = q(".ps-pg-sfx-detail");
-        const fields = SFX_FIELDS.map(([title, list]) => el("div", {class: "ps-pg-sfx-group"}, [
+        const fields = SFX_FIELDS.map(([title, list], gi) => el("div", {class: "ps-pg-sfx-group" + (gi === 1 ? " ps-pg-sfx-jitter" : "")}, [
             el("div", {class: "ps-pg-sfx-label", text: title}),
             ...list.map(([path, label, min, max, step, unit, help]) => el("label", {class: "ps-pg-sfx-field", title: help}, [
                 el("span", {class: "ps-pg-sfx-name", text: label}),
@@ -1706,7 +1499,7 @@
             ]),
             el("label", {class: "ps-pg-sfx-field ps-pg-sfx-textfield"}, [
                 el("span", {class: "ps-pg-sfx-name", text: "文字"}),
-                el("input", {type: "text", class: "ps-pg-sfx-text", maxlength: 100}),
+                el("textarea", {class: "ps-pg-sfx-text", rows: 1, spellcheck: "false"}),
             ]),
             el("div", {class: "ps-pg-sfx-row"}, [
                 el("button", {type: "button", class: "mtm-btn ps-pg-sfx-dfont", "data-font-target": "sfx", title: "フォントを選びます"}),
@@ -1714,6 +1507,9 @@
                     el("button", {type: "button", class: "mtm-btn", "data-sfx-dir": "h", text: "横", title: "横書き"}),
                     el("button", {type: "button", class: "mtm-btn", "data-sfx-dir": "v", text: "縦", title: "縦書き"}),
                 ]),
+                el("button", {type: "button", class: "mtm-btn ps-pg-sfx-align", text: "≡ 整列",
+                    title: "ゆらぎ・ずれ・傾き・斜体・曲がりを使わず、升目にそろえて並べます（セリフの組み方。改行で次の行）。外すと元の形に戻ります（改行はなくなります）",
+                    onclick: () => editSfx((p) => (p.align = !p.align), true)}),
             ]),
             el("div", {class: "ps-pg-sfx-row"}, [
                 el("button", {type: "button", class: "mtm-btn ps-pg-sfx-fonts-toggle", text: "🔤 フォント別の見え方",
@@ -1812,8 +1608,13 @@
         const text = q(".ps-pg-sfx-text");
         text.addEventListener("input", () => text.value.trim() && editSfx((p) => (p.text = text.value), false));
         text.addEventListener("change", () => text.value.trim() && editSfx((p) => (p.text = text.value), true));
+        // 整列なら Enter で改行、Ctrl+Enter で決める。整列でなければ Enter で決める
         text.addEventListener("keydown", (e) => {
-            if (e.key === "Enter" && !e.isComposing) e.target.blur();
+            if (e.key !== "Enter" || e.isComposing) return;
+            const s = selected();
+            if (s && s.type === "sfx" && s.params.align && !(e.ctrlKey || e.metaKey)) return;
+            e.preventDefault();
+            e.target.blur();
         });
         q(".ps-pg-sfx-dfont").addEventListener("click", (e) => (isFontPickerOpen() ? closeFontPicker() : openFontPicker(e.currentTarget, "sfx")));
         box.querySelectorAll("[data-sfx-dir]").forEach((b) => b.addEventListener("click", () => editSfx((p) => (p.vertical = b.dataset.sfxDir === "v"), true)));
@@ -1868,7 +1669,8 @@
 
     // 文字列のスタンプの設定（既定の形 ＋ フォント・大きさ）
     function wordParams(word) {
-        return SFX().clean({text: word, font: prefs.sfxFont, size: prefs.sfxSize, seed: SFX().randomSeed()});
+        const align = prefs.sfxAlign ? {align: true, vertical: true} : {};
+        return SFX().clean({text: word, font: prefs.sfxFont, size: prefs.sfxSize, seed: SFX().randomSeed(), ...align});
     }
 
     // スタンプモードにする。kind は "word"（id は文字列）か "stamp"（id は調整済みスタンプの id）
@@ -1981,7 +1783,7 @@
             return;
         }
         // 図形を動かすたびに描き直さないよう、パレットの中身が変わったときだけ作り直す
-        const sig = JSON.stringify([sfxLib, sfxLibLoaded, prefs.sfxFont, prefs.sfxSize, prefs.sfxVary, !!fontList,
+        const sig = JSON.stringify([sfxLib, sfxLibLoaded, prefs.sfxFont, prefs.sfxSize, prefs.sfxVary, prefs.sfxAlign, !!fontList,
             prefs.tool === "sfx" && stampSource ? [stampSource.kind, stampSource.id] : null, sfxLoads]);
         if (sig === sfxPaletteSig) return;
         sfxPaletteSig = sig;
@@ -1989,6 +1791,7 @@
         font.textContent = fontName(prefs.sfxFont) + " ▾";
         if (document.activeElement !== q(".ps-pg-sfx-newsize")) q(".ps-pg-sfx-newsize").value = prefs.sfxSize;
         q(".ps-pg-sfx-vary").checked = prefs.sfxVary;
+        q(".ps-pg-sfx-align-new").checked = prefs.sfxAlign;
         const active = (kind, id) => prefs.tool === "sfx" && stampSource && stampSource.kind === kind && stampSource.id === id;
         const words = q(".ps-pg-sfx-words");
         words.textContent = "";
@@ -2159,6 +1962,15 @@
         });
         const text = q(".ps-pg-sfx-text");
         if (document.activeElement !== text) text.value = p.text;
+        text.rows = p.align ? clamp(p.text.split("\n").length + 1, 2, 6) : 1;
+        // 整列では使わない設定を隠す
+        q(".ps-pg-sfx-align").classList.toggle("mtm-active", p.align);
+        q(".ps-pg-sfx-reroll").classList.toggle("ps-off", p.align);
+        q(".ps-pg-sfx-jitter").classList.toggle("ps-off", p.align);
+        q(".ps-pg-sfx-zig").classList.toggle("ps-off", p.align);
+        for (const [path, hide] of [["sizeStart", true], ["sizeEnd", true], ["rise", true], ["italic", true], ["curve", true], ["jitter.offset", true], ["lineHeight", false]]) {
+            box.querySelector(`[data-sfx="${path}"]`).closest("label").classList.toggle("ps-off", hide === p.align);
+        }
         q(".ps-pg-sfx-dfont").textContent = fontName(p.font) + " ▾";
         box.querySelectorAll("[data-sfx-dir]").forEach((b) => b.classList.toggle("mtm-active", (b.dataset.sfxDir === "v") === p.vertical));
         const zigLabel = {1: p.vertical ? "交互・1 字目を右へ" : "交互・1 字目を上へ", "-1": p.vertical ? "交互・1 字目を左へ" : "交互・1 字目を下へ", 0: "ばらばら"};
@@ -2168,7 +1980,7 @@
             b.classList.toggle("mtm-active", Number(b.dataset.sfxZig) === p.zigzag);
         });
         // 字の手直し
-        const chars = Array.from(p.text);
+        const chars = SFX().charsOf(p.text);
         if (activeGlyph >= chars.length) activeGlyph = -1;
         const on = vertexMode && activeGlyph >= 0;
         q(".ps-pg-sfx-glyphmode").classList.toggle("mtm-active", vertexMode);
@@ -2305,7 +2117,6 @@
     // 編集するページを変える。元に戻すの履歴はページごとなので、変えたら空にする
     function setActivePage(page) {
         if (page === ed.page) return;
-        finishTextEdit(true);
         if (drag) cancelDrag();
         ed.page = page;
         ed.sel = null;
@@ -2378,7 +2189,6 @@
         if (!ed) return;
         const opts = ed.opts;
         closeFontPicker();
-        finishTextEdit(true);
         if (drag) cancelDrag();
         closeCrop();
         // 書き出し用の画像の作り直しを待っていたら、すぐに始める（閉じたあとも続く）
@@ -2429,7 +2239,6 @@
 
     function undo() {
         if (!ed) return;
-        finishTextEdit(true);
         if (!ed.undo.length) return;
         ed.redo.push(snapshot());
         restore(ed.undo.pop());
@@ -2437,7 +2246,6 @@
 
     function redo() {
         if (!ed) return;
-        finishTextEdit(true);
         if (!ed.redo.length) return;
         ed.undo.push(snapshot());
         restore(ed.redo.pop());
@@ -2449,7 +2257,6 @@
         if (tool !== "sfx") stampSource = null;
         savePrefs();
         if (!ed) return;
-        finishTextEdit(true);
         if (drag) cancelDrag();
         if (tool !== "select") ed.sel = null;
         render();
@@ -2457,7 +2264,7 @@
 
     // 選択の道具で図形を選んでいれば、その線を変える。描く道具では、これから描く図形の線を決める
     // いま線の太さを決める図形の種類（選んだ図形、なければ道具で描く図形）
-    const strokeType = (s) => (s ? s.type : ["line", "hline", "text", "sfx"].includes(prefs.tool) ? prefs.tool : "rect");
+    const strokeType = (s) => (s ? s.type : ["line", "hline", "sfx"].includes(prefs.tool) ? prefs.tool : "rect");
     // 線の太さのボタンを使わない図形（素材・セリフ・オノマトペ・手描き線。手描き線は下の行で太さを決める）
     const noStroke = (type) => floating({type}) || type === "hline";
 
@@ -2644,10 +2451,6 @@
         const hlineBar = prefs.tool === "hline" || !!hlineShape;
         q(".ps-pg-hlinebar").classList.toggle("ps-off", !hlineBar);
         if (hlineBar) fillHlineBar(hlineShape || prefs.hline, !!hlineShape);
-        const textShape = s && s.type === "text" ? s : null;
-        const textBar = prefs.tool === "text" || !!textShape;
-        q(".ps-pg-textbar").classList.toggle("ps-off", !textBar);
-        if (textBar) fillTextBar(textShape || prefs.text);
         q(".ps-pg-pick").disabled = !s || s.type !== "rect";
         q(".ps-pg-vertex-mode").classList.toggle("mtm-active", vertexMode);
         q(".ps-pg-squarify").disabled = !s || !s.pts;
@@ -2922,7 +2725,6 @@
         // 文字列のスタンプも調整済みスタンプも、左クリックで 1 つ置いて選んだ状態にし（すぐ調整できる）、右クリックなら置いたあともスタンプを続ける
         if (prefs.tool === "sfx" && (e.button === 0 || e.button === 2)) {
             e.preventDefault();
-            finishTextEdit(true);
             const once = e.button === 0 && !!stampSource;
             placeStamp(inPage(toPage(e))).then((s) => {
                 if (!once || !s || !ed || !shapeOf(s.id)) return;
@@ -2934,19 +2736,6 @@
         if (e.button !== 0) return;
         e.preventDefault();
         const p = toPage(e);
-        // セリフの道具：置いたセリフを押したら文字を直す。ほかの所なら新しく置く
-        if (prefs.tool === "text") {
-            const hit = e.target.closest("[data-id]");
-            const s = hit && shapeOf(hit.dataset.id);
-            if (s && s.type === "text") {
-                if (!textEdit || textEdit.id !== s.id) startTextEdit(s, null);
-            } else {
-                finishTextEdit(true);
-                createText(inPage(p));
-            }
-            return;
-        }
-        finishTextEdit(true);
         drag = {
             kind: "", id: "", start: p, client: {x: e.clientX, y: e.clientY}, moved: false,
             before: snapshot(), unit: unit(), noSnap: e.altKey, targets: null,
@@ -3278,7 +3067,6 @@
             return;
         }
         // 選んであった四角をもう一度クリックしたら、はめ込む画像を選ぶ
-        // 選んであったセリフをもう一度クリックしたら、文字を直す
         const s = shapeOf(d.id);
         // 選んでいるオノマトペをダブルクリックしたら、字を 1 つずつ直す の入り・切りを切り替える。
         // ドラッグのために押した所を捕まえているので、dblclick はキャンバス全体に届いてしまい、どの図形か分からない。押した間隔で見分ける
@@ -3291,7 +3079,6 @@
             if (twice) toggleVertexMode();
         }
         if (d.kind === "move" && d.wasSelected && s && s.type === "rect") openPicker(s);
-        if (d.kind === "move" && d.wasSelected && s && s.type === "text") startTextEdit(s, null);
     }
 
     function cancelDrag() {
@@ -3365,17 +3152,6 @@
             }
             return;
         }
-        // セリフの入力中は、Esc（取り消し）と Ctrl+Enter（決定）のほかは入力欄に任せる
-        if (textEdit) {
-            if (e.key === "Escape") {
-                stop();
-                finishTextEdit(false);
-            } else if (e.key === "Enter" && (e.ctrlKey || e.metaKey) && !e.isComposing) {
-                stop();
-                finishTextEdit(true);
-            }
-            return;
-        }
         if (e.key === "Escape") {
             stop();
             // 画像の一覧ではカット案の一覧に戻る
@@ -3420,9 +3196,9 @@
             stop();
             const step = e.shiftKey ? 10 : 1;
             nudge({ArrowLeft: -step, ArrowRight: step}[e.key] || 0, {ArrowUp: -step, ArrowDown: step}[e.key] || 0);
-        } else if (key === "v" || key === "l" || key === "w" || key === "r" || key === "y" || key === "t") {
+        } else if (key === "v" || key === "l" || key === "w" || key === "r" || key === "y") {
             stop();
-            setTool({v: "select", l: "line", w: "hline", r: "rect", y: "tri", t: "text"}[key]);
+            setTool({v: "select", l: "line", w: "hline", r: "rect", y: "tri"}[key]);
         } else if (key === "e") {
             stop();
             toggleVertexMode();
@@ -3447,9 +3223,6 @@
         } else if (e.key === "Enter" && selected() && selected().type === "rect") {
             stop();
             openPicker(selected());
-        } else if (e.key === "Enter" && selected() && selected().type === "text") {
-            stop();
-            startTextEdit(selected(), null);
         }
     }
 
@@ -3841,7 +3614,7 @@
         refocus();
     }
 
-    // 画像のクロップ・フォント選び・セリフの入力・ドラッグの途中か（Alt+B で閉じないようにする）
-    const busy = () => !!ed && (isCropOpen() || isFontPickerOpen() || !!textEdit || !!drag);
+    // 画像のクロップ・フォント選び・ドラッグの途中か（Alt+B で閉じないようにする）
+    const busy = () => !!ed && (isCropOpen() || isFontPickerOpen() || !!drag);
     window.PolarisPages = {newPage, thumb, open, close, isOpen, busy, keydown, refresh: () => ed && render()};
 })();

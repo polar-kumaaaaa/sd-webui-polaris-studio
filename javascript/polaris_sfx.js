@@ -11,6 +11,11 @@
     const BAKE_MAX = 8192;
     // 縦書きで 90° 回す字（セリフと同じ）
     const ROTATE = "ー－−–—―…‥～〜~（）()「」『』【】〔〕［］[]｛｝{}〈〉《》＜＞<>＝=-_｜|：:";
+    // 整列のとき、縦書きで升目の右上に置く字・少し右上に寄せる字・2 字までなら横に並べて 1 升に入れる字（縦中横）
+    const CORNER = "、。，．､｡,.";
+    const SMALL = "ぁぃぅぇぉっゃゅょゎゕゖァィゥェォッャュョヮヵヶ";
+    const TCY = "0123456789!?";
+    const TEXT_MAX = 100, ALIGN_TEXT_MAX = 300, ALIGN_LINES = 20;
 
     // 既定の設定。大きさはページのピクセル、ほかは字の大きさ（size）に対する割合か角度。
     //   sizeStart・sizeEnd：始めと終わりの字の大きさ（%）。間はなめらかに変える
@@ -23,8 +28,12 @@
     //   amount：ゆらぎの強さ（%。jitter 全体に掛ける。交互のずれには掛けない）
     //   outlines：フチ。字に近い方から順に、色と太さ（%）
     //   glyphs：字ごとの手直し。i 番目の字の {x, y（字の大きさに対する %。全体の傾きの前の向き）, rot（°）, size（%）}。なければ null
+    //     i は改行を数えない字の順番
+    //   align：整列。ゆらぎ・交互のずれ・傾き・斜体・曲がり・大きさの変化を使わず、升目にそろえて並べる（セリフの組み方）。
+    //     このときだけ改行で次の行にできる（縦書きは右の行から左へ）。lineHeight は行の間隔（字の大きさに対する %）
+    //     ほかの設定は残しておくので、整列を外せば元の形に戻る
     const DEFAULTS = {
-        text: "ドン", font: "", vertical: false, size: 140,
+        text: "ドン", font: "", vertical: false, size: 140, align: false, lineHeight: 150,
         sizeStart: 100, sizeEnd: 100, spacing: 0, rise: 0, italic: 0, curve: 0,
         jitter: {rot: 6, size: 6, offset: 6, tilt: 4}, zigzag: 1, amount: 100,
         fill: "#000000", outlines: [{color: "#ffffff", width: 8}],
@@ -63,11 +72,14 @@
         p = p && typeof p === "object" ? p : {};
         const j = p.jitter && typeof p.jitter === "object" ? p.jitter : {};
         const D = DEFAULTS;
+        const align = p.align === true;
         return {
-            text: typeof p.text === "string" && p.text.trim() ? p.text.replace(/[\r\n]+/g, "").slice(0, 100) : D.text,
+            text: cleanText(p.text, align),
             font: typeof p.font === "string" ? p.font : "",
             vertical: p.vertical === true,
             size: num(p.size, 8, 2000, D.size),
+            align,
+            lineHeight: num(p.lineHeight, 100, 400, D.lineHeight),
             sizeStart: num(p.sizeStart, 10, 400, D.sizeStart),
             sizeEnd: num(p.sizeEnd, 10, 400, D.sizeEnd),
             spacing: num(p.spacing, -60, 200, D.spacing),
@@ -87,6 +99,19 @@
             seed: Math.floor(num(p.seed, 0, 2147483647, 1)),
         };
     }
+
+    // 文字。整列なら改行を残し（前後の空行は落とす）、そうでなければ 1 行にする
+    function cleanText(v, align) {
+        if (typeof v !== "string" || !v.trim()) return DEFAULTS.text;
+        if (!align) return v.replace(/[\r\n]+/g, "").slice(0, TEXT_MAX);
+        const lines = v.replace(/\r\n?/g, "\n").slice(0, ALIGN_TEXT_MAX).split("\n");
+        while (lines.length && !lines[0].trim()) lines.shift();
+        while (lines.length && !lines[lines.length - 1].trim()) lines.pop();
+        return lines.slice(0, ALIGN_LINES).join("\n");
+    }
+
+    // 改行を除いた字の並び（字の手直しの番号はこれで数える）
+    const charsOf = (text) => Array.from(text).filter((ch) => ch !== "\n");
 
     // 字ごとの手直し。何も変えていない字は null にし、後ろの null は詰める
     function cleanGlyphs(list) {
@@ -121,11 +146,11 @@
     const listeners = new Set();    // 輪郭が届いたら呼ぶ
 
     const gkey = (font, ch) => font + "\n" + ch;
-    const ready = (p) => Array.from(p.text).every((ch) => glyphs.has(gkey(p.font, ch)));
+    const ready = (p) => charsOf(p.text).every((ch) => glyphs.has(gkey(p.font, ch)));
 
     // 足りない字の輪郭を取りに行く。届いたら listeners を呼ぶ
     function load(p) {
-        const missing = [...new Set(Array.from(p.text))].filter((ch) => !glyphs.has(gkey(p.font, ch)));
+        const missing = [...new Set(charsOf(p.text))].filter((ch) => !glyphs.has(gkey(p.font, ch)));
         if (!missing.length) return Promise.resolve();
         const key = gkey(p.font, missing.join(""));
         if (!loading.has(key)) {
@@ -145,6 +170,7 @@
     // 戻り値は字ごとの変換と大きさ、全体の傾き、外枠（フチの分の余白を含む）
 
     function layout(p) {
+        if (p.align) return alignedLayout(p);
         const r = rng(p.seed);
         const k = p.amount / 100;
         const chars = Array.from(p.text);
@@ -210,12 +236,105 @@
         return {items, angle, box: {x: x0 - pad, y: y0 - pad, w: x1 - x0 + pad * 2, h: y1 - y0 + pad * 2}, base};
     }
 
+    // 整列：セリフと同じ組み方。縦書きは 1 字ずつ字の大きさの升目に並べ、右の行から左へ。横書きは字形の幅で並べる。
+    //   - 縦書きの「ー」「（」などは 90° 回し、「、」「。」は升目の右上に、小さい「っ」などは少し右上に寄せる
+    //   - 縦書きで半角の数字・!・? が 2 字までなら、横に並べて 1 升に入れる（縦中横）。升目に入らなければ縮める
+    // 原点は升目全体の真ん中。外枠は升目にフチの分の余白を足したもの
+    function alignedLayout(p) {
+        const base = p.size;
+        const adv = base * (1 + p.spacing / 100), pitch = base * p.lineHeight / 100;
+        const lines = p.text.split("\n");
+        const glyph = (ch) => glyphs.get(gkey(p.font, ch)) || {d: "", adv: 500, cy: -380};
+        const items = [];
+        const put = (ch, x, y, scale, turn) => items.push({ch, g: glyph(ch), scale, x, y, rot: 0, turn});
+        let w, h;
+        if (p.vertical) {
+            w = base + (lines.length - 1) * pitch;
+            let longest = base;
+            lines.forEach((line, li) => {
+                const cx = w - base / 2 - li * pitch;
+                const cells = [];
+                const chars = Array.from(line);
+                for (let i = 0; i < chars.length;) {
+                    if (!TCY.includes(chars[i])) {
+                        cells.push([chars[i++]]);
+                        continue;
+                    }
+                    let j = i;
+                    while (j < chars.length && TCY.includes(chars[j])) j++;
+                    if (j - i <= 2) cells.push(chars.slice(i, j));
+                    else chars.slice(i, j).forEach((ch) => cells.push([ch]));
+                    i = j;
+                }
+                cells.forEach((cell, k) => {
+                    const cy = base / 2 + k * adv;
+                    if (cell.length > 1) {
+                        const total = cell.reduce((a, ch) => a + glyph(ch).adv / 1000 * base, 0);
+                        const s = total > base * 0.95 ? base * 0.95 / total : 1;
+                        let x = cx - total * s / 2;
+                        for (const ch of cell) {
+                            const a = glyph(ch).adv / 1000 * base * s;
+                            put(ch, x + a / 2, cy, base * s, false);
+                            x += a;
+                        }
+                        return;
+                    }
+                    const ch = cell[0];
+                    if (ROTATE.includes(ch)) put(ch, cx, cy, base, true);
+                    else if (CORNER.includes(ch)) put(ch, cx + base * 0.5, cy - base * 0.5, base, false);
+                    else if (SMALL.includes(ch)) put(ch, cx + base * 0.08, cy - base * 0.08, base, false);
+                    else put(ch, cx, cy, base, false);
+                });
+                if (cells.length) longest = Math.max(longest, base + (cells.length - 1) * adv);
+            });
+            h = longest;
+        } else {
+            let widest = base;
+            lines.forEach((line, li) => {
+                const cy = base / 2 + li * pitch;
+                let cursor = 0;
+                Array.from(line).forEach((ch, j) => {
+                    if (j) cursor += p.spacing / 100 * base;
+                    const a = glyph(ch).adv / 1000 * base;
+                    put(ch, cursor + a / 2, cy, base, false);
+                    cursor += a;
+                });
+                widest = Math.max(widest, cursor);
+            });
+            w = widest;
+            h = base + (lines.length - 1) * pitch;
+        }
+        items.forEach((it, i) => {
+            it.x -= w / 2;
+            it.y -= h / 2;
+            const o = p.glyphs[i];
+            if (o) {
+                it.x += o.x / 100 * base;
+                it.y += o.y / 100 * base;
+                it.rot += o.rot;
+                it.scale *= o.size / 100;
+            }
+        });
+        const pad = p.outlines.reduce((a, o) => a + o.width, 0) / 100 * base + base * 0.06;
+        // 字の手直しで升目の外に出た字も枠に入れる
+        let x0 = -w / 2, y0 = -h / 2, x1 = w / 2, y1 = h / 2;
+        items.forEach((it, i) => {
+            if (!p.glyphs[i]) return;
+            const r = it.scale / 2 * Math.SQRT2;
+            x0 = Math.min(x0, it.x - r); y0 = Math.min(y0, it.y - r); x1 = Math.max(x1, it.x + r); y1 = Math.max(y1, it.y + r);
+        });
+        return {items, angle: 0, box: {x: x0 - pad, y: y0 - pad, w: x1 - x0 + pad * 2, h: y1 - y0 + pad * 2}, base};
+    }
+
+    // 整列なら斜体を使わない
+    const italicOf = (p) => (p.align ? 0 : p.italic);
+
     const f1 = (v) => Math.round(v * 100) / 100;
 
     // 字ごとの変換（字形の単位 → 並びの座標）
     function glyphTransform(it, p) {
         const s = it.scale / 1000;
-        return `translate(${f1(it.x)} ${f1(it.y)}) rotate(${f1(it.rot)}) skewX(${f1(-p.italic)}) scale(${f1(s * 1000) / 1000})` +
+        return `translate(${f1(it.x)} ${f1(it.y)}) rotate(${f1(it.rot)}) skewX(${f1(-italicOf(p))}) scale(${f1(s * 1000) / 1000})` +
             (it.turn ? " rotate(90)" : "") + ` translate(${f1(-it.g.adv / 2)} ${f1(-it.g.cy)})`;
     }
 
@@ -261,7 +380,7 @@
         const rad = lay.angle * Math.PI / 180;
         const cos = Math.cos(rad), sin = Math.sin(rad);
         const toPage = (x, y) => ({x: shape.x + sx * (x * cos - y * sin - lay.box.x), y: shape.y + sy * (x * sin + y * cos - lay.box.y)});
-        const skew = Math.tan(p.italic * Math.PI / 180);
+        const skew = Math.tan(italicOf(p) * Math.PI / 180);
         const glyphs = lay.items.map((it, i) => {
             const hw = (it.turn ? 500 : it.g.adv / 2) / 1000 * it.scale, hh = (it.turn ? it.g.adv / 2 : 500) / 1000 * it.scale;
             const a = it.rot * Math.PI / 180;
@@ -383,6 +502,6 @@
 
     window.PolarisSfx = {
         DEFAULTS, PRESETS, clean, randomSeed, load, ready: (p) => ready(clean(p)), build, node, preview, fit, frames, refit,
-        keyOf, stale, bake, rasterize, onLoad: (f) => listeners.add(f),
+        keyOf, stale, bake, rasterize, onLoad: (f) => listeners.add(f), charsOf,
     };
 })();
