@@ -670,6 +670,8 @@ def _generation_params(raw, default_steps):
 POSE_PARTS = {"pose_keypoints_2d": 18, "hand_left_keypoints_2d": 21, "hand_right_keypoints_2d": 21, "face_keypoints_2d": 70}
 POSE_MODES = ("BALANCED", "PROMPT", "CONTROL")
 POSE_MAX_PEOPLE = 20
+POSE_DETECTED_KEY = "polaris_detected"
+DEPTH_ERASE_MAX = 300
 
 
 def _clamp_float(value, low, high, default):
@@ -686,20 +688,26 @@ def _clamp_float(value, low, high, default):
 def _sanitize_pose(raw):
     if not isinstance(raw, dict):
         return None
+    def points(values, count):
+        if not isinstance(values, list) or len(values) != count * 3:
+            return None
+        return [
+            round(_clamp_float(v, -1.0, 2.0, 0.0), 5) if i % 3 < 2 else (1.0 if _clamp_float(v, 0, 1, 0) >= 1 else 0.0)
+            for i, v in enumerate(values)
+        ]
+
     people = []
     for person in _dicts(raw.get("people"))[:POSE_MAX_PEOPLE]:
-        out = {}
-        for key, count in POSE_PARTS.items():
-            values = person.get(key)
-            if not isinstance(values, list) or len(values) != count * 3:
-                out[key] = None
-                continue
-            out[key] = [
-                round(_clamp_float(v, -1.0, 2.0, 0.0), 5) if i % 3 < 2 else (1.0 if _clamp_float(v, 0, 1, 0) >= 1 else 0.0)
-                for i, v in enumerate(values)
-            ]
-        if out["pose_keypoints_2d"] is not None:
-            people.append(out)
+        out = {key: points(person.get(key), count) for key, count in POSE_PARTS.items()}
+        if out["pose_keypoints_2d"] is None:
+            continue
+        # 画像から取り出したときの体と手（深度から、動かした手足の元の位置を消すのに使う）
+        detected = person.get(POSE_DETECTED_KEY)
+        if isinstance(detected, dict):
+            det = {key: points(detected.get(key), count) for key, count in POSE_PARTS.items() if key != "face_keypoints_2d"}
+            if det["pose_keypoints_2d"] is not None:
+                out[POSE_DETECTED_KEY] = det
+        people.append(out)
     return {
         "canvas_width": _positive_int(raw.get("canvas_width"), 512),
         "canvas_height": _positive_int(raw.get("canvas_height"), 512),
@@ -1611,8 +1619,40 @@ def _job_depth(control, raw, project, cut):
     elif available and module not in available:
         raise ValueError(f"深度のプリプロセッサ {module} がありません")
     with Image.open(path) as im:
-        source = np.array(im.convert("RGB"))
-    return {**depth, "module": module, "image": source, "name": name}
+        source = im.convert("RGB")
+    erased = erase_moved_limbs(source, (raw or {}).get("erase"))
+    return {**depth, "module": module, "image": np.array(source), "name": name, "erased": erased}
+
+
+# ポーズで動かした手足の元の位置（JS が決めた線と円。座標は 0〜1、太さは短い辺に対する比）を、背景の色で塗る。
+# 元の手足が深度に残ると、ポーズで動かした手足と一緒に元の手足も描かれてしまうため。塗った数を返す
+def erase_moved_limbs(image, shapes):
+    shapes = _dicts(shapes)[:DEPTH_ERASE_MAX]
+    if not shapes:
+        return 0
+    w, h = image.size
+    short = min(w, h)
+    # 背景の色は、画像の縁の色の中央値
+    arr = np.asarray(image)
+    border = np.concatenate([arr[0], arr[-1], arr[:, 0], arr[:, -1]])
+    color = tuple(int(v) for v in np.median(border, axis=0))
+    draw = ImageDraw.Draw(image)
+    count = 0
+    for s in shapes:
+        a, b = s.get("a"), s.get("b")
+        if not (isinstance(a, list) and isinstance(b, list) and len(a) == 2 and len(b) == 2):
+            continue
+        ax, ay = _clamp_float(a[0], -1, 2, 0) * w, _clamp_float(a[1], -1, 2, 0) * h
+        bx, by = _clamp_float(b[0], -1, 2, 0) * w, _clamp_float(b[1], -1, 2, 0) * h
+        width = max(1.0, _clamp_float(s.get("w"), 0, 1, 0) * short)
+        r = width / 2
+        # 線の両端は丸くする
+        if (ax, ay) != (bx, by):
+            draw.line([(ax, ay), (bx, by)], fill=color, width=int(round(width)))
+        for x, y in ((ax, ay), (bx, by)):
+            draw.ellipse([x - r, y - r, x + r, y + r], fill=color)
+        count += 1
+    return count
 
 
 def _controlnet_script(p):
@@ -1668,7 +1708,7 @@ def apply_pose(p, pose):
             # reforge は {image, mask} の形だけを読む（Neo もこの形を読める）
             "image": {"image": source, "mask": np.zeros_like(source)},
         })
-        message += f", depth -> unit {depth['unit'] + 1} ({depth['module']}, {depth['model']})"
+        message += f", depth -> unit {depth['unit'] + 1} ({depth['module']}, {depth['model']}, erased {depth.get('erased', 0)} limb parts)"
     p.script_args = tuple(args) if isinstance(p.script_args, tuple) else args
     print(message)
 

@@ -14,6 +14,9 @@
         {id: "face", key: "face_keypoints_2d", count: 70, label: "顔"},
     ];
     const PART = Object.fromEntries(PARTS.map((x) => [x.id, x]));
+    // 画像から取り出したときの体と手を、人ごとにこの名前で一緒に保存する（顔は使わない）
+    const DETECTED_KEY = "polaris_detected";
+    const ORIG_PARTS = PARTS.filter((x) => x.id !== "face");
     const BODY_NAMES = ["鼻", "首", "右肩", "右ひじ", "右手首", "左肩", "左ひじ", "左手首", "右腰", "右ひざ", "右足首", "左腰", "左ひざ", "左足首", "右目", "左目", "右耳", "左耳"];
     const FINGER_NAMES = ["親指", "人差し指", "中指", "薬指", "小指"];
 
@@ -77,26 +80,31 @@
         }
         const sx = normalized ? w : 1;
         const sy = normalized ? h : 1;
+        const readPart = (person, part) => {
+            const a = person[part.key];
+            if (!Array.isArray(a) || a.length !== part.count * 3) return null;
+            const pts = [];
+            for (let i = 0; i < part.count; i++) {
+                const x = Number(a[i * 3]) || 0;
+                const y = Number(a[i * 3 + 1]) || 0;
+                const v = Number(a[i * 3 + 2]) >= 1;
+                // 見つからなかった点は (0, 0) で来るので、置き場所が決まっていない印を付けて、あとで仮の場所に置く
+                pts.push({x: x * sx, y: y * sy, v, unplaced: !v && x === 0 && y === 0});
+            }
+            return part.id !== "body" && !pts.some((p) => p.v) ? null : pts;
+        };
         const list = [];
         for (const person of people) {
             const out = {};
-            for (const part of PARTS) {
-                const a = person[part.key];
-                if (!Array.isArray(a) || a.length !== part.count * 3) {
-                    out[part.id] = null;
-                    continue;
-                }
-                out[part.id] = [];
-                for (let i = 0; i < part.count; i++) {
-                    const x = Number(a[i * 3]) || 0;
-                    const y = Number(a[i * 3 + 1]) || 0;
-                    const v = Number(a[i * 3 + 2]) >= 1;
-                    // 見つからなかった点は (0, 0) で来るので、置き場所が決まっていない印を付けて、あとで仮の場所に置く
-                    out[part.id].push({x: x * sx, y: y * sy, v, unplaced: !v && x === 0 && y === 0});
-                }
-                if (part.id !== "body" && !out[part.id].some((p) => p.v)) out[part.id] = null;
-            }
+            for (const part of PARTS) out[part.id] = readPart(person, part);
             if (!out.body) continue;
+            // 画像から取り出したときの体と手（深度から、動かした手足の元の位置を消すのに使う）
+            const det = person[DETECTED_KEY];
+            if (det && typeof det === "object") {
+                const orig = {};
+                for (const part of ORIG_PARTS) orig[part.id] = readPart(det, part);
+                if (orig.body) out.orig = orig;
+            }
             list.push(out);
         }
         for (const person of list) placeHidden(person, w, h);
@@ -113,9 +121,12 @@
             canvas_height: model.height,
             people: model.people.map((person) => {
                 const out = {};
-                for (const part of PARTS) {
-                    const pts = person[part.id];
-                    out[part.key] = pts ? pts.flatMap((p) => [r(p.x * sx), r(p.y * sy), p.v ? 1 : 0]) : null;
+                const flat = (pts) => (pts ? pts.flatMap((p) => [r(p.x * sx), r(p.y * sy), p.v ? 1 : 0]) : null);
+                for (const part of PARTS) out[part.key] = flat(person[part.id]);
+                // 取り出したときの点は、ポラスタの中だけで使う（JSON の書き出しには入れない）
+                if (!pixel && person.orig) {
+                    out[DETECTED_KEY] = {};
+                    for (const part of ORIG_PARTS) out[DETECTED_KEY][part.key] = flat(person.orig[part.id]);
                 }
                 return out;
             }),
@@ -339,6 +350,65 @@
         return found;
     }
 
+    // ---------- 深度から消す場所 ----------
+    // ポーズで動かした手足は、取り出し元の画像の元の位置が深度に残ると、元の手足も描かれてしまう。
+    // 取り出したときの点と今の点を比べて、動いた手足の元の位置（線と円）を返す。座標は 0〜1、太さは画像の短い辺に対する比
+    const ERASE_LIMBS = [
+        {chain: [2, 3, 4], hand: "right"},  // 右腕（画面の左）
+        {chain: [5, 6, 7], hand: "left"},
+        {chain: [8, 9, 10]},                 // 右脚
+        {chain: [11, 12, 13]},
+    ];
+
+    function eraseAreas(poseJson) {
+        const m = fromJson(poseJson);
+        const W = m.width;
+        const H = m.height;
+        const short = Math.min(W, H);
+        const moveLimit = Math.max(6, short * 0.02);   // これより動いた点を「動かした」とみなす
+        const out = [];
+        const add = (a, b, width) => out.push({a: [a.x / W, a.y / H], b: [b.x / W, b.y / H], w: width / short});
+        const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+        for (const person of m.people) {
+            const orig = person.orig;
+            if (!orig || !orig.body) continue;
+            const ob = orig.body;
+            const seen = (p) => p && p.v;
+            // 動いたか：元で見えていた点が、今は見えない・大きく動いた
+            const moved = (o, c) => seen(o) && (!c || !c.v || dist(o, c) > moveLimit);
+            // 手足の太さは肩幅から決める（なければ画像の大きさから）
+            const shoulders = seen(ob[2]) && seen(ob[5]) ? dist(ob[2], ob[5]) : 0;
+            const limbWidth = Math.max(12, shoulders ? shoulders * 0.45 : short * 0.06);
+            for (const limb of ERASE_LIMBS) {
+                const ch = limb.chain;
+                const mv = ch.map((i) => moved(ob[i], person.body[i]));
+                for (let k = 0; k < ch.length - 1; k++) {
+                    const a = ob[ch[k]];
+                    const b = ob[ch[k + 1]];
+                    if ((mv[k] || mv[k + 1]) && seen(a) && seen(b)) add(a, b, limbWidth * (limb.hand ? 1 : 1.3));
+                }
+                if (!limb.hand) continue;
+                const oh = orig[limb.hand];
+                const ch2 = person[limb.hand];
+                const wrist = ob[ch[2]];
+                const wristMoved = mv[2];
+                if (oh && oh.some(seen)) {
+                    const handMoved = wristMoved || !ch2 || oh.some((p, i) => moved(p, ch2[i]));
+                    if (!handMoved) continue;
+                    // 手の大きさ（手首から中指の先まで）に合わせた太さで、指の線をなぞる
+                    const tip = [12, 11, 10, 9].map((i) => oh[i]).find(seen);
+                    const size = seen(oh[0]) && tip ? dist(oh[0], tip) : limbWidth * 1.5;
+                    const w = Math.max(10, size * 0.45);
+                    for (const [i, j] of HAND_EDGES) if (seen(oh[i]) && seen(oh[j])) add(oh[i], oh[j], w);
+                } else if (wristMoved && seen(wrist)) {
+                    // 手が取り出せていなくても、手首を動かしたら手のあたりを消す
+                    add(wrist, wrist, limbWidth * 2.2);
+                }
+            }
+        }
+        return out;
+    }
+
     // 生成に渡す形 {image, unit, model, weight, start, end, mode, depth}。depth は取り出し元の画像の名前と、深度のユニットの設定
     async function jobPayload(job) {
         const control = withDefaults(job.control);
@@ -353,7 +423,8 @@
         };
         const d = control.depth;
         if (d.use) {
-            out.depth = {...d, model: await resolveModel(d.model, /depth/i, "depth"), name: (job.pose && job.pose.source) || ""};
+            out.depth = {...d, model: await resolveModel(d.model, /depth/i, "depth"), name: (job.pose && job.pose.source) || "",
+                erase: job.pose ? eraseAreas(job.pose) : []};
         }
         return out;
     }
@@ -488,6 +559,7 @@
                         <label class="ps-pose-field">開始<input type="number" class="ps-pose-depth-start" min="0" max="1" step="0.05"></label>
                         <label class="ps-pose-field">終了<input type="number" class="ps-pose-depth-end" min="0" max="1" step="0.05"></label>
                         <div class="ps-pose-note">ポーズを取り出した画像の奥行きを、もう 1 つのユニットに入れます。手の形や体の厚み、服や髪の形も元の画像に近づきます。ポーズのユニットと別の番号にしてください。深度の絵は生成のたびに ControlNet が作ります（重視はポーズと同じ）。</div>
+                        <div class="ps-pose-note">取り出したあとに動かした腕・手・脚は、元の位置を背景の色で塗ってから深度を作ります（元の手足が残らないように）。塗る場所は、ポーズの絵の上に薄い赤で出します。この版より前に取り出したポーズでは塗りません（取り出し直すと塗ります）。</div>
                     </section>
                     <section class="ps-pose-help">
                         <div class="ps-pose-head">操作</div>
@@ -614,6 +686,8 @@
                 changed = true;
             });
         }
+        // 深度を使うかで、消す場所の表示が変わる
+        q(".ps-pose-depth-use").addEventListener("change", draw);
         for (const sel of [".ps-pose-unit", ".ps-pose-depth-unit"]) {
             for (let i = 0; i < 8; i++) q(sel).appendChild(new Option(`${i + 1} 番目`, String(i)));
         }
@@ -815,6 +889,8 @@
             const blob = await (await fetch(url)).blob();
             const json = await detect(blob);
             const next = fromJson(json);
+            // 取り出したときの体と手を覚えておく（動かした手足の元の位置を、深度から消すのに使う）
+            for (const p of next.people) p.orig = clone({body: p.body, left: p.left, right: p.right});
             if (!next.people.length) {
                 alert("人が見つかりませんでした。");
                 return;
@@ -1169,6 +1245,24 @@
             ctx.globalAlpha = 1;
         }
         drawPose(ctx, model, show);
+        // 深度を使うときは、深度から消す場所（動かした手足の元の位置）を薄い赤で見せる
+        if (q(".ps-pose-depth-use").checked && model.source) {
+            ctx.save();
+            ctx.globalAlpha = 0.35;
+            ctx.strokeStyle = ctx.fillStyle = "#ff3b3b";
+            ctx.lineCap = "round";
+            const short = Math.min(model.width, model.height);
+            for (const e of eraseAreas(toJson(model, false))) {
+                const ax = e.a[0] * model.width, ay = e.a[1] * model.height;
+                const bx = e.b[0] * model.width, by = e.b[1] * model.height;
+                ctx.lineWidth = e.w * short;
+                ctx.beginPath();
+                ctx.moveTo(ax, ay);
+                ctx.lineTo(bx + (ax === bx && ay === by ? 0.01 : 0), by);
+                ctx.stroke();
+            }
+            ctx.restore();
+        }
         // つかむ印（画面の座標で描く）
         ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
         ctx.strokeStyle = "rgba(255,255,255,0.35)";
