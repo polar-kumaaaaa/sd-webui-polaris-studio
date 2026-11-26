@@ -541,6 +541,11 @@
                             <button type="button" class="mtm-btn ps-pose-hide" title="選んだ点を隠します。隠した点はポーズの絵に描かれません (Delete)">隠す</button>
                             <button type="button" class="mtm-btn ps-pose-unhide" title="選んだ点を見せます (Shift+Delete)">見せる</button>
                         </div>
+                        <label class="ps-pose-range" title="選んだ点（2 点以上）を、並びの比率を保ったまま、まとめて大きく・小さくします。中心は選んだ点の範囲の真ん中です。Alt+ホイールでも変えられます">大きさ<input type="range" class="ps-pose-scale" min="25" max="200" step="1" value="100"><span class="ps-pose-scale-value">100%</span></label>
+                        <div class="ps-pose-row">
+                            <button type="button" class="mtm-btn ps-pose-scale-down" title="選んだ点を 5% 小さくします (Alt+ホイール下)">−5%</button>
+                            <button type="button" class="mtm-btn ps-pose-scale-up" title="選んだ点を 5% 大きくします (Alt+ホイール上)">＋5%</button>
+                        </div>
                     </section>
                     <section>
                         <div class="ps-pose-head">手</div>
@@ -630,6 +635,7 @@
                         <div>点をダブルクリック：そこから先をまとめて選ぶ（肩なら腕と手、鼻なら目・耳・顔、首なら手のほかの全部。手首なら手全体、顔の点なら顔全体）</div>
                         <div>H：手の反転／Q・E：手を回す</div>
                         <div>ホイール：拡大・縮小</div>
+                        <div>Alt+ホイール：選んだ点をまとめて大きく・小さく（比率はそのまま）</div>
                         <div>右ドラッグ・中ドラッグ・Space+ドラッグ：動かして見る</div>
                         <div>矢印キー：1px 動かす（Shift で 10px）</div>
                         <div>Delete：隠す／Shift+Delete：見せる</div>
@@ -664,6 +670,8 @@
         root.addEventListener("keydown", keyDown);
         root.addEventListener("keyup", (e) => {
             if (e.code === "Space") spaceDown = false;
+            // Alt+ホイールのあとに Alt を離しても、ブラウザのメニューに移らないようにする
+            if (e.key === "Alt") e.preventDefault();
             if (e.key === "Shift" && brush && hover && !drag) {
                 hover.keep = false;
                 draw();
@@ -688,6 +696,10 @@
         q(".ps-pose-rotl").addEventListener("click", () => rotateHands(-15));
         q(".ps-pose-rotr").addEventListener("click", () => rotateHands(15));
         q(".ps-pose-hide").addEventListener("click", () => setVisible(false));
+        q(".ps-pose-scale").addEventListener("input", () => scaleSlider(false));
+        q(".ps-pose-scale").addEventListener("change", () => scaleSlider(true));
+        q(".ps-pose-scale-down").addEventListener("click", () => scaleSelection(0.95));
+        q(".ps-pose-scale-up").addEventListener("click", () => scaleSelection(1 / 0.95));
         q(".ps-pose-unhide").addEventListener("click", () => setVisible(true));
         q(".ps-pose-fit").addEventListener("click", () => {
             fit();
@@ -1503,6 +1515,10 @@
         q(".ps-pose-rotr").disabled = noHand;
         q(".ps-pose-hide").disabled = !selected.size;
         q(".ps-pose-unhide").disabled = !selected.size;
+        const canScale = selected.size >= 2;
+        q(".ps-pose-scale").disabled = !canScale;
+        q(".ps-pose-scale-down").disabled = !canScale;
+        q(".ps-pose-scale-up").disabled = !canScale;
         q(".ps-pose-export").disabled = !model.people.length;
         updateDepthNote();
     }
@@ -1719,8 +1735,70 @@
         draw();
     }
 
+    // ---------- 選んだ点の大きさ ----------
+    // 選んだ点を、その範囲の真ん中を中心に、比率を保ったまま大きく・小さくする
+
+    function selectionCenter(points) {
+        const xs = points.map((p) => p.x);
+        const ys = points.map((p) => p.y);
+        return {x: (Math.min(...xs) + Math.max(...xs)) / 2, y: (Math.min(...ys) + Math.max(...ys)) / 2};
+    }
+
+    // 続けて変えたとき（ホイールを回し続ける・ボタンを続けて押す）は、まとめて 1 回で戻せるようにする
+    let lastScaleAt = 0;
+    function scaleSelection(factor) {
+        const points = [...selected].map(pointOf).filter(Boolean);
+        if (points.length < 2) return;
+        const now = Date.now();
+        if (now - lastScaleAt > 600) pushUndo();
+        lastScaleAt = now;
+        const c = selectionCenter(points);
+        for (const p of points) {
+            p.x = c.x + (p.x - c.x) * factor;
+            p.y = c.y + (p.y - c.y) * factor;
+        }
+        changed = true;
+        updateUi();
+        draw();
+    }
+
+    // スライダーは、動かし始めたときの位置からの倍率（離すと 100% に戻る）
+    let scaleStart = null;
+    function scaleSlider(final) {
+        const slider = q(".ps-pose-scale");
+        const v = Number(slider.value) / 100;
+        if (!scaleStart) {
+            const keys = [...selected].filter((k) => pointOf(k));
+            if (keys.length < 2) return;
+            pushUndo();
+            const start = keys.map((k) => [k, {...pointOf(k)}]);
+            scaleStart = {start, c: selectionCenter(start.map(([, p]) => p))};
+        }
+        const {start, c} = scaleStart;
+        for (const [k, p0] of start) {
+            const p = pointOf(k);
+            if (!p) continue;
+            p.x = c.x + (p0.x - c.x) * v;
+            p.y = c.y + (p0.y - c.y) * v;
+        }
+        changed = true;
+        q(".ps-pose-scale-value").textContent = `${Math.round(v * 100)}%`;
+        if (final) {
+            scaleStart = null;
+            slider.value = 100;
+            q(".ps-pose-scale-value").textContent = "100%";
+            status(`${Math.round(v * 100)}% にしました`);
+        }
+        draw();
+    }
+
     function wheel(e) {
         e.preventDefault();
+        // Alt+ホイールは、選んだ点の大きさを変える
+        if (e.altKey && selected.size >= 2) {
+            scaleSelection(e.deltaY < 0 ? 1.05 : 1 / 1.05);
+            return;
+        }
         const {x, y} = localPos(e);
         const before = toCanvas(x, y);
         const k = e.deltaY < 0 ? 1.15 : 1 / 1.15;
