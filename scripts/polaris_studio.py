@@ -1832,10 +1832,75 @@ def pose_to_original(pose, width, height, resolution):
     return {**pose, "people": out, "canvas_width": width, "canvas_height": height}
 
 
-def take_job():
+def take_job(tab="txt2img"):
+    """頼まれた生成を受け取る。txt2img と img2img（ポラスタの「描き直す」）で取り違えないよう、頼んだタブのものだけを返す"""
     global _job
+    if not _job or _job.get("tab", "txt2img") != tab:
+        return None
     job, _job = _job, None
-    return job if job and time.time() - job["at"] < JOB_LIFETIME else None
+    return job if time.time() - job["at"] < JOB_LIFETIME else None
+
+
+# ---------- 描き直す（img2img・インペイント） ----------
+# ポラスタの画面で選んだ元の画像とマスクを、WebUI の img2img の生成に差し込む。
+# WebUI の img2img の画面の画像欄やマスクは使わない（before_process は p.init より前に呼ばれる）
+
+I2I_FILLS = (0, 1, 2, 3)        # マスクした部分の始め方：塗りつぶし・元の絵・潜在ノイズ・潜在の空
+
+
+def _job_i2i(raw, project, cut):
+    if not isinstance(raw, dict):
+        return None
+    name = str(raw.get("name", ""))
+    path = image_path(project, cut, name)
+    if not os.path.isfile(path):
+        raise ValueError(f"描き直す元の画像がありません（{name}）")
+    with Image.open(path) as im:
+        image = im.convert("RGB")
+    mask = None
+    data = str(raw.get("mask") or "")
+    if data:
+        if "," in data:
+            data = data.split(",", 1)[1]
+        try:
+            mask = Image.open(io.BytesIO(base64.b64decode(data))).convert("L")
+        except Exception:
+            raise ValueError("マスクの画像が読めません")
+        if mask.size != image.size:
+            mask = mask.resize(image.size, Image.NEAREST)
+        # 塗っていなければ img2img（マスクなし）
+        if not mask.getbbox():
+            mask = None
+    fill = int(_clamp_float(raw.get("fill"), 0, 3, 1))
+    width = int(_clamp_float(raw.get("width"), 64, 4096, image.width)) // 8 * 8
+    height = int(_clamp_float(raw.get("height"), 64, 4096, image.height)) // 8 * 8
+    return {
+        "image": image,
+        "mask": mask,
+        "denoise": round(_clamp_float(raw.get("denoise"), 0, 1, 0.55), 3),
+        "mask_blur": int(_clamp_float(raw.get("maskBlur"), 0, 64, 4)),
+        "fill": fill if fill in I2I_FILLS else 1,
+        "only_masked": bool(raw.get("onlyMasked", True)),
+        "padding": int(_clamp_float(raw.get("padding"), 0, 256, 32)),
+        "width": width,
+        "height": height,
+    }
+
+
+def apply_i2i(p, i2i):
+    p.init_images = [i2i["image"]]
+    p.image_mask = i2i["mask"]
+    p.denoising_strength = i2i["denoise"]
+    p.mask_blur = i2i["mask_blur"]
+    p.inpainting_fill = i2i["fill"]
+    p.inpaint_full_res = i2i["only_masked"]
+    p.inpaint_full_res_padding = i2i["padding"]
+    p.inpainting_mask_invert = 0
+    p.resize_mode = 0
+    p.width = i2i["width"]
+    p.height = i2i["height"]
+    kind = "inpaint" if i2i["mask"] is not None else "img2img"
+    print(f"[Polaris Studio] redraw ({kind}) denoise {i2i['denoise']} size {p.width}x{p.height}")
 
 
 class PolarisJobScript(scripts.Script):
@@ -1850,7 +1915,10 @@ class PolarisJobScript(scripts.Script):
         return scripts.AlwaysVisible
 
     def before_process(self, p, *args):
-        job = _i2i if self.is_img2img else (take_job() or _t2i)
+        if self.is_img2img:
+            job = take_job("img2img") or _i2i
+        else:
+            job = take_job() or _t2i
         if job is None:
             return
         p.outpath_samples = cut_dir(job["project"], job["cut"])
@@ -1860,6 +1928,8 @@ class PolarisJobScript(scripts.Script):
         p.override_settings["samples_save"] = True
         p.extra_generation_params["Polaris Cut"] = job["cut"]
         p.extra_generation_params["Polaris Source"] = job["source"]
+        if self.is_img2img and job.get("i2i"):
+            apply_i2i(p, job["i2i"])
         if job.get("pose"):
             apply_pose(p, job["pose"])
 
@@ -1877,11 +1947,14 @@ def on_app_started(demo, app):
             cut_dir(payload.get("project"), payload.get("cut"))
         except ValueError as e:
             return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
+        tab = "img2img" if payload.get("tab") == "img2img" else "txt2img"
         try:
             pose = _job_pose(payload.get("pose"), payload["project"], payload["cut"])
+            i2i = _job_i2i(payload.get("i2i"), payload["project"], payload["cut"]) if tab == "img2img" else None
         except ValueError as e:
             return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
-        _job = {"project": payload["project"], "cut": payload["cut"], "source": str(payload.get("source", "preview")), "pose": pose, "at": time.time()}
+        _job = {"project": payload["project"], "cut": payload["cut"], "source": str(payload.get("source", "preview")), "pose": pose,
+                "i2i": i2i, "tab": tab, "at": time.time()}
         return {"ok": True}
 
     @app.get("/polaris-studio/pose/models")

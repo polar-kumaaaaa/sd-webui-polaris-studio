@@ -1699,6 +1699,36 @@
         }
     }
 
+    // ポラスタの「描き直す」。元の画像とマスクは Python が img2img の生成に差し込むので、WebUI の img2img の画像欄は使わない。
+    // プロンプト・Steps・枚数・Seed だけを img2img の画面に書き込み、img2img のタブ（マスクのないモード）で生成する
+    async function generateI2i(job) {
+        const tab = "img2img";
+        const pos = promptArea(tab, false);
+        const neg = promptArea(tab, true);
+        if (!pos || !neg) throw new Error("img2img のプロンプト欄が見つかりません");
+        setPrompt(pos, job.positive);
+        setPrompt(neg, job.negative);
+        writeWebuiValue("steps", job.steps, tab);
+        writeWebuiValue("batch_count", job.batch, tab);
+        writeWebuiValue("batch_size", 1, tab);
+        writeField(webuiSeedInput(tab, "seed"), String(job.seed));
+        writeVariationStrength(0, tab);
+        if (job.width && job.height) {
+            writeWebuiValue("width", job.width, tab);
+            writeWebuiValue("height", job.height, tab);
+        }
+        // インペイントなどのモードのままだと、空の画像欄を読もうとして失敗するので、img2img のモードにしておく
+        if (typeof window.switch_to_img2img === "function") window.switch_to_img2img();
+        const pose = job.pose && window.PolarisPose ? await window.PolarisPose.jobPayload(job.pose) : null;
+        await sleep(300);
+        await postJob("polaris-studio/job", {project: job.project, cut: job.cut, source: job.source, tab, pose, i2i: job.i2i});
+        try {
+            await generateAndWait(tab);
+        } finally {
+            await postJob("polaris-studio/job/clear");
+        }
+    }
+
     // img2img・インペイントに送るときに、プロンプトと出力サイズを img2img に転記する
     function writeImg2img(values) {
         const tab = "img2img";
@@ -1868,6 +1898,7 @@
         },
         openEditor,
         generate,
+        generateI2i,
         writeImg2img,
         stackOverflow,
         fmtTime,

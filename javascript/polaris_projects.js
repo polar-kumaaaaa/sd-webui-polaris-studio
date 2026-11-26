@@ -327,6 +327,7 @@
                     <button type="button" class="mtm-btn ps-view-fav" title="お気に入りにする・外す (F)">♡ お気に入り</button>
                     <button type="button" class="mtm-btn ps-view-key">キー画像に指定</button>
                     <button type="button" class="mtm-btn ps-view-restore" title="この画像の生成情報のプロンプトをカット案に戻す">プロンプトを戻す</button>
+                    <button type="button" class="mtm-btn mtm-primary ps-view-redraw" title="この画像を元に、ポラスタの中でマスクを塗って描き直す（img2img・インペイント）。できた画像はこのカット案に入る">描き直す</button>
                     <button type="button" class="mtm-btn ps-view-img2img" title="WebUI の img2img に送る。生成した画像はこのカット案に保存される">img2img に送る</button>
                     <button type="button" class="mtm-btn ps-view-i2i" title="WebUI のインペイントに送る。生成した画像はこのカット案に保存される">インペイントに送る</button>
                     <button type="button" class="mtm-btn ps-view-pose" title="この画像からポーズを取り出し、カット案のポーズの画面を開く（カット案に入るのは、編集画面で「保存」したとき）">ポーズを抽出</button>
@@ -450,6 +451,7 @@
         q(".ps-view-restore").addEventListener("click", restorePromptFromImage);
         q(".ps-view-img2img").addEventListener("click", () => sendToImg2img("img2img"));
         q(".ps-view-pose").addEventListener("click", extractPoseFromViewer);
+        q(".ps-view-redraw").addEventListener("click", openRedrawFromViewer);
         q(".ps-view-i2i").addEventListener("click", () => sendToImg2img("inpaint"));
         q(".ps-view-delete").addEventListener("click", () => askDeleteImages([selKey(viewCut, viewImage.name)], "画像を削除"));
         q(".ps-view-select").addEventListener("click", toggleViewSelect);
@@ -507,6 +509,8 @@
     }
 
     function onKeydown(e) {
+        // 描き直す画面のキー操作は、その画面に任せる
+        if (window.PolarisI2i && window.PolarisI2i.isOpen()) return;
         if (e.code === "KeyB" && e.altKey && !e.ctrlKey && !e.shiftKey && !e.metaKey) {
             toggleBooksByKey(e);
             return;
@@ -2838,6 +2842,65 @@
         cut.negative = image.negative;
         refreshViews();
         await saveProjects();
+    }
+
+    // ---------- 描き直す（ポラスタの中の img2img・インペイント） ----------
+    // ビューワーの画像を元に、ポラスタの画面でマスクを塗って描き直す。できた画像はカット案に入り、その画面の一覧に並ぶ
+
+    function openRedrawFromViewer() {
+        if (!viewImage || !viewCut || !window.PolarisI2i) return;
+        const p = project;
+        const cut = viewCut;
+        const start = viewImage;
+        hide(".ps-viewer");
+        window.PolarisI2i.open({
+            title: `${p.title} / ${cut.title}`,
+            images: () => imagesOf(p, cut),
+            imageUrl: (image) => imageUrl(p, cut, image, false),
+            thumbUrl: (image) => imageUrl(p, cut, image, true),
+            start,
+            cutPrompt: {positive: cut.positive, negative: cut.negative},
+            hasPose: !!poseJob(cut),
+            generate: (settings) => runRedraw(p, cut, settings),
+            onClose() {
+                fs.focus();
+                if (project === p) {
+                    if (galleryCut === cut && isOpen(".ps-gallery-view")) renderGallery();
+                    refreshViews();
+                }
+            },
+        });
+    }
+
+    // 描き直しを生成し、できた画像を返す
+    async function runRedraw(p, cut, settings) {
+        if (generating) throw new Error("生成中です。終わってから実行してください。");
+        const before = new Set(imagesOf(p, cut).map((x) => x.name));
+        generating = true;
+        if (isOpen(".ps-queues-view")) renderQueueManager();
+        startToast("描き直す", cut.title, interruptGeneration);
+        window.PolarisStudio.onProgress((text, info) => updateToast(info));
+        try {
+            await window.PolarisStudio.generateI2i({
+                project: p.id, cut: cut.id, source: "i2i:" + settings.source.name,
+                positive: settings.positive, negative: settings.negative,
+                width: settings.width, height: settings.height,
+                steps: settings.steps, batch: settings.count, seed: settings.seed,
+                pose: settings.usePose ? poseJob(cut) : null,
+                i2i: settings.i2i,
+            });
+            await loadImages(p);
+            const made = imagesOf(p, cut).filter((x) => !before.has(x.name));
+            endToast("描き直す", made.length ? `${made.length} 枚できました` : "画像は生成されませんでした", made.length > 0);
+            return made;
+        } catch (e) {
+            endToast("描き直す", "描き直しに失敗しました: " + e.message, false);
+            throw e;
+        } finally {
+            window.PolarisStudio.onProgress(null);
+            generating = false;
+            if (isOpen(".ps-queues-view")) renderQueueManager();
+        }
     }
 
     // ---------- i2i（img2img・インペイント） ----------

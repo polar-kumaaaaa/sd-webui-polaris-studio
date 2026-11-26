@@ -3936,6 +3936,49 @@ body.mtm-fs-open {
     border-color: var(--color-accent);
 }
 
+/* ---------- 描き直す（img2img・インペイント）。枠と並びはポーズの画面と同じ ---------- */
+
+.ps-i2i .ps-pose-side {
+    width: 320px;
+}
+
+.ps-i2i-where {
+    color: var(--body-text-color-subdued);
+    font-size: 13px;
+}
+
+.ps-i2i-mode {
+    margin-right: 6px;
+    color: var(--body-text-color-subdued);
+    font-size: 12px;
+}
+
+.ps-i2i textarea {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 6px 8px;
+    border: 1px solid var(--border-color-primary);
+    border-radius: 6px;
+    background: var(--background-fill-secondary);
+    color: var(--body-text-color);
+    font: 12px/1.5 ui-monospace, Consolas, monospace;
+    resize: vertical;
+}
+
+/* この画面で生成した画像の印 */
+.ps-i2i .ps-pose-src span.ps-i2i-new,
+.ps-i2i .ps-pose-src:first-child span.ps-i2i-new {
+    position: absolute;
+    left: 3px;
+    top: 3px;
+    right: auto;
+    bottom: auto;
+    padding: 0 5px;
+    border-radius: 6px;
+    background: var(--color-accent);
+    color: #fff;
+}
+
 /* 外から画像をドラッグしている間の案内 */
 #mtm-fs .ps-pose-drop {
     position: absolute;
