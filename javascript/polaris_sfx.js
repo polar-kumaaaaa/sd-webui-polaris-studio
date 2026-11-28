@@ -142,27 +142,78 @@
     // ---------- 字形の輪郭 ----------
 
     const glyphs = new Map();       // "フォント\n字" → {d, adv, cy}
-    const loading = new Map();      // "フォント\n字の並び" → Promise
+    const loading = new Map();      // "フォント\n字の並び" → 取りに行く分 {font, missing, low, tag, promise, resolve}
+    const queue = [];               // まだ送っていない分（頼まれた順）
     const listeners = new Set();    // 輪郭が届いたら呼ぶ
+    const PARALLEL = 2;             // 同時に送る数。サーバーはフォントを 1 つずつ開くので、多く送っても速くならない
+    let running = 0;
+    let notifying = false;
 
     const gkey = (font, ch) => font + "\n" + ch;
     const ready = (p) => charsOf(p.text).every((ch) => glyphs.has(gkey(p.font, ch)));
 
-    // 足りない字の輪郭を取りに行く。届いたら listeners を呼ぶ
-    function load(p) {
+    // 足りない字の輪郭を取りに行く。届いたら listeners を呼ぶ。
+    // 置いたオノマトペの分を先に送り、見本（low）の分は頼まれた順に、空いたら送る。
+    // tag を付けた見本の分は、dropQueued(tag) でまとめて取りやめられる
+    function load(p, {low = false, tag = ""} = {}) {
         const missing = [...new Set(charsOf(p.text))].filter((ch) => !glyphs.has(gkey(p.font, ch)));
         if (!missing.length) return Promise.resolve();
         const key = gkey(p.font, missing.join(""));
-        if (!loading.has(key)) {
-            const url = `polaris-studio/glyphs?font=${encodeURIComponent(p.font || "win:YuGothB.ttc#0")}&text=${encodeURIComponent(missing.join(""))}`;
-            loading.set(key, fetch(url).then((r) => r.json()).then((data) => {
-                for (const ch of missing) glyphs.set(gkey(p.font, ch), (data.glyphs && data.glyphs[ch]) || {d: "", adv: 500, cy: -380});
-                listeners.forEach((f) => f());
-            }).catch(() => {
-                for (const ch of missing) glyphs.set(gkey(p.font, ch), {d: "", adv: 500, cy: -380});
-            }).finally(() => loading.delete(key)));
+        let job = loading.get(key);
+        if (!job) {
+            job = {key, font: p.font, missing, low, tag};
+            job.promise = new Promise((resolve) => (job.resolve = resolve));
+            loading.set(key, job);
+            queue.push(job);
+        } else if (!low) {
+            job.low = false;
+            job.tag = "";
         }
-        return loading.get(key);
+        pump();
+        return job.promise;
+    }
+
+    function pump() {
+        while (running < PARALLEL && queue.length) {
+            const first = queue.findIndex((j) => !j.low);
+            const job = queue.splice(first < 0 ? 0 : first, 1)[0];
+            running++;
+            const url = `polaris-studio/glyphs?font=${encodeURIComponent(job.font || "win:YuGothB.ttc#0")}&text=${encodeURIComponent(job.missing.join(""))}`;
+            fetch(url).then((r) => r.json()).then((data) => {
+                for (const ch of job.missing) glyphs.set(gkey(job.font, ch), (data.glyphs && data.glyphs[ch]) || {d: "", adv: 500, cy: -380});
+                notify();
+            }).catch(() => {
+                for (const ch of job.missing) glyphs.set(gkey(job.font, ch), {d: "", adv: 500, cy: -380});
+            }).finally(() => {
+                loading.delete(job.key);
+                running--;
+                job.resolve();
+                pump();
+            });
+        }
+    }
+
+    // 続けて届いたときに何度も描き直さないよう、次の描画の前にまとめて知らせる
+    function notify() {
+        if (notifying) return;
+        notifying = true;
+        const run = () => {
+            notifying = false;
+            listeners.forEach((f) => f());
+        };
+        if (typeof requestAnimationFrame === "function" && !document.hidden) requestAnimationFrame(run);
+        else setTimeout(run, 0);
+    }
+
+    // まだ送っていない見本の分のうち tag のものをやめる（字を打ち変えたら、前の字の見本を待たせない）
+    function dropQueued(tag) {
+        for (let i = queue.length - 1; i >= 0; i--) {
+            const job = queue[i];
+            if (!job.low || job.tag !== tag) continue;
+            queue.splice(i, 1);
+            loading.delete(job.key);
+            job.resolve();
+        }
     }
 
     // ---------- 並べ方 ----------
@@ -356,10 +407,11 @@
 
     // 形を作る。輪郭がまだ届いていなければ null（届いたら listeners が呼ばれる）
     // 戻り値の w, h は外枠の大きさ、svg は外枠を 0,0 からとした中身
-    function build(params) {
+    // low：見本のための形（輪郭は置いたオノマトペの分のあとで取りに行く）
+    function build(params, low = false) {
         const p = clean(params);
         if (!ready(p)) {
-            load(p);
+            load(p, {low});
             return null;
         }
         const lay = layout(p);
@@ -414,9 +466,17 @@
         return true;
     }
 
-    // ページの SVG に置く <g>。x, y, w, h の枠に合わせる
+    // ページの SVG に置く <g>。x, y, w, h の枠に合わせる。
+    // 字を打ち変えて新しい字の輪郭を待つ間は、前の形を出しておく（消えて見えないように）
+    const lastBuilt = new Map();    // 置いたオノマトペの id → 最後に作れた形
     function node(shape) {
-        const b = build(shape.params);
+        let b = build(shape.params);
+        if (b && shape.id) {
+            if (lastBuilt.size > 500) lastBuilt.clear();
+            lastBuilt.set(shape.id, b);
+        } else if (!b && shape.id) {
+            b = lastBuilt.get(shape.id);
+        }
         if (!b) return null;
         const g = document.createElementNS(NS, "g");
         g.setAttribute("transform", `translate(${shape.x} ${shape.y}) scale(${shape.w / b.w} ${shape.h / b.h})`);
@@ -426,7 +486,7 @@
 
     // 一覧に出す小さな見本（SVG 要素）
     function preview(params, size) {
-        const b = build(params);
+        const b = build(params, true);
         const svg = document.createElementNS(NS, "svg");
         svg.setAttribute("class", "ps-sfx-preview");
         if (!b) return svg;
@@ -502,6 +562,6 @@
 
     window.PolarisSfx = {
         DEFAULTS, PRESETS, clean, randomSeed, load, ready: (p) => ready(clean(p)), build, node, preview, fit, frames, refit,
-        keyOf, stale, bake, rasterize, onLoad: (f) => listeners.add(f), charsOf,
+        keyOf, stale, bake, rasterize, onLoad: (f) => listeners.add(f), charsOf, dropQueued,
     };
 })();

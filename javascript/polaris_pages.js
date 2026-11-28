@@ -1902,6 +1902,14 @@
         }
         fontCompareSig = sig;
         fontCompareAt = Date.now();
+        // 新しい字の輪郭が届くまでは、前の見本を薄くして出しておく
+        const before = new Map();
+        for (const card of grid.querySelectorAll(".ps-pg-sfx-fontcard")) {
+            const svg = card.querySelector(".ps-sfx-preview");
+            if (svg && svg.hasAttribute("viewBox")) before.set(card.dataset.font, svg);
+        }
+        // 前の字の見本でまだ取りに行っていない分はやめ、並びの上から順に取りに行く
+        SFX().dropQueued("compare");
         grid.textContent = "";
         if (fonts.length <= 1) {
             grid.appendChild(el("div", {class: "mtm-empty", text: "フォント選びで ☆ を付けたフォント・追加したフォント・最近使ったフォントの見本がここに並びます。"}));
@@ -1909,16 +1917,20 @@
         for (const id of fonts) {
             const params = {...cloneParams(p), font: id};
             // 字形がまだなら読み込む（届いたら描き直す）
-            if (!SFX().ready(params)) SFX().load(params);
+            const ready = SFX().ready(params);
+            if (!ready) SFX().load(params, {low: true, tag: "compare"});
+            let look = ready ? null : before.get(id);
+            if (look) look.classList.add("ps-sfx-stale");
+            else look = SFX().preview(params);
             const on = id === p.font;
             const name = fontName(id);
-            grid.appendChild(el("div", {class: "ps-pg-sfx-stamp ps-pg-sfx-fontcard" + (on ? " ps-on" : "")}, [
+            grid.appendChild(el("div", {class: "ps-pg-sfx-stamp ps-pg-sfx-fontcard" + (on ? " ps-on" : ""), "data-font": id}, [
                 el("button", {type: "button", class: "ps-pg-sfx-stamp-pick", title: on ? `${name}（今のフォント）` : `${name} にする`,
                     onclick: () => {
                         if (on) return;
                         useFont(id);
                         editSfx((x) => (x.font = id), true);
-                    }}, [SFX().preview(params)]),
+                    }}, [look]),
                 el("div", {class: "ps-pg-sfx-stamp-font", text: shortText(name, STAMP_FONT_CHARS), title: name}),
                 el("button", {type: "button", class: "mtm-icon ps-pg-sfx-fontcard-add", text: "＋", title: "このフォントの形を調整済みスタンプに登録します",
                     onclick: () => registerStamp(id)}),

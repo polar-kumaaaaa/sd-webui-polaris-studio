@@ -2844,6 +2844,11 @@ body.mtm-fs-open {
     height: 100%;
 }
 
+/* フォント別の見え方で、新しい字の輪郭を待っている間の前の見本 */
+.ps-pg-sfx-stamp-pick .ps-sfx-preview.ps-sfx-stale {
+    opacity: 0.35;
+}
+
 /* 調整済みスタンプの下に出すフォント名（長い名前は … で切る） */
 .ps-pg-sfx-stamp-font {
     margin-top: 2px;
