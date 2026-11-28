@@ -376,102 +376,30 @@ def _panel_cut(raw, cut_ids):
     return {"cut": cut}
 
 
+# まとめ（グループ）。同じ group の図形は、画面で 1 つを動かすと一緒に動く。オノマトペ・手描き線・素材・セリフに付く。
+# 1 つしか残らない group は外す
+GROUP_TYPES = ("sfx", "hline", "material", "text")
+
+
+def _apply_groups(shapes, groups):
+    counts = {}
+    for i, g in groups.items():
+        counts[g] = counts.get(g, 0) + 1
+    for i, g in groups.items():
+        if counts[g] >= 2:
+            shapes[i]["group"] = g
+
+
 def _sanitize_page(raw, cut_ids):
     shapes = []
+    groups = {}     # shapes の位置 → group
     for s in _dicts(raw.get("shapes")):
-        if s.get("type") == "line":
-            shapes.append({
-                "id": _safe_id(s.get("id")),
-                "type": "line",
-                **{k: _number(s.get(k)) for k in ("x1", "y1", "x2", "y2")},
-                "stroke": _stroke(s.get("stroke"), False),
-            })
-        elif s.get("type") == "rect":
-            # pts があるコマは多角形（三角・台形・平行四辺形など）。x, y, w, h はその外枠で、画像は外枠に合わせて置き、多角形で切り抜く
-            pts = _panel_points(s.get("pts"))
-            if pts:
-                xs, ys = [p[0] for p in pts], [p[1] for p in pts]
-                box = {"x": min(xs), "y": min(ys), "w": round(max(xs) - min(xs), 1), "h": round(max(ys) - min(ys), 1)}
-            else:
-                box = {k: _number(s.get(k)) for k in ("x", "y", "w", "h")}
-            if box["w"] < 1 or box["h"] < 1:
-                continue
-            shapes.append({
-                "id": _safe_id(s.get("id")),
-                "type": "rect",
-                **box,
-                **({"pts": pts} if pts else {}),
-                "stroke": _stroke(s.get("stroke"), True),
-                # 重なったとき、この四角で後ろのコマ（画像と線）を隠す
-                **({"front": True} if s.get("front") is True else {}),
-                # このコマ用として対応させたカット案（画像を選ぶとき、そのカット案から始める）。なくなったカット案は外す
-                **_panel_cut(s.get("cut"), cut_ids),
-                "image": _sanitize_panel_image(s.get("image"), cut_ids),
-            })
-        elif s.get("type") == "material":
-            # 素材（吹き出し・集中線・小物など）。コマと線の上の層に、並び順（後ろほど手前）に置く。ページから一部はみ出してよい
-            name = str(s.get("name", ""))
-            w, h = _number(s.get("w")), _number(s.get("h"))
-            if not re.fullmatch(MATERIAL_NAME, name) or w < 1 or h < 1:
-                continue
-            shapes.append({
-                "id": _safe_id(s.get("id")),
-                "type": "material",
-                "name": name,
-                "x": _number(s.get("x")),
-                "y": _number(s.get("y")),
-                "w": w,
-                "h": h,
-            })
-        elif s.get("type") == "text":
-            text = _sanitize_text(s)
-            if text:
-                shapes.append(text)
-        elif s.get("type") == "hline":
-            # 手描き線。形は始点・終点・太さ・揺れ・種で決まり、ブラウザで描く。書き出しには、ブラウザで描いた画像（name）を
-            # x, y, w, h の枠に置く（オノマトペと同じ）。素材と同じ層に、並び順に重ねる
-            name = str(s.get("name", ""))
-            outline = int(_ranged(s.get("outline"), *HLINE_OUTLINE, 0))
-            shapes.append({
-                "id": _safe_id(s.get("id")),
-                "type": "hline",
-                **{k: _number(s.get(k)) for k in ("x1", "y1", "x2", "y2", "x", "y", "w", "h")},
-                "width": int(_ranged(s.get("width"), *HLINE_WIDTH, 12)),
-                "wobble": int(_ranged(s.get("wobble"), *HLINE_WOBBLE, 30)),
-                "color": _color(s.get("color"), "#000000"),
-                "outline": outline,
-                "outlineColor": _color(s.get("outlineColor"), "#ffffff"),
-                "seed": _shape_seed(s.get("seed")),
-                # 蛇行（終わりのほうのくねり）。大きさ・始まる位置（%）・波の数
-                "snake": int(_ranged(s.get("snake"), *HLINE_SNAKE, 0)),
-                "snakeFrom": int(_ranged(s.get("snakeFrom"), *HLINE_SNAKE_FROM, 80)),
-                "snakeWaves": int(_ranged(s.get("snakeWaves"), *HLINE_SNAKE_WAVES, 3)),
-                # 始点・終点を細くするか（入り・抜き）
-                "taperIn": s.get("taperIn") is not False,
-                "taperOut": s.get("taperOut") is not False,
-                "name": name if re.fullmatch(MATERIAL_NAME, name) else "",
-                **({"key": str(s.get("key"))[:64]} if s.get("key") else {}),
-            })
-        elif s.get("type") == "sfx":
-            # オノマトペ。形は params で決まり、ブラウザで描く。書き出しには、ブラウザで描いた画像（素材と同じ置き場所の name）を使う。
-            # 素材と同じ層に、並び順に重ねる
-            params = sanitize_sfx_params(s.get("params"))
-            name = str(s.get("name", ""))
-            w, h = _number(s.get("w")), _number(s.get("h"))
-            if params is None or w < 1 or h < 1:
-                continue
-            shapes.append({
-                "id": _safe_id(s.get("id")),
-                "type": "sfx",
-                "name": name if re.fullmatch(MATERIAL_NAME, name) else "",
-                **({"key": str(s.get("key"))[:64]} if s.get("key") else {}),
-                "x": _number(s.get("x")),
-                "y": _number(s.get("y")),
-                "w": w,
-                "h": h,
-                "params": params,
-                **_balloon(s.get("balloon")),
-            })
+        before = len(shapes)
+        _sanitize_shape(s, shapes, cut_ids)
+        group = str(s.get("group") or "")
+        if len(shapes) > before and s.get("type") in GROUP_TYPES and re.fullmatch(r"[A-Za-z0-9_-]{1,64}", group):
+            groups[len(shapes) - 1] = group
+    _apply_groups(shapes, groups)
     # 名前は Book の画面で見分けるためのもの（書き出しのファイル名には使わない）
     name = str(raw.get("name", "")).strip()[:PAGE_NAME_MAX]
     return {
@@ -482,6 +410,102 @@ def _sanitize_page(raw, cut_ids):
         "height": _page_size(raw.get("height"), PAGE_HEIGHT),
         "shapes": shapes,
     }
+
+
+def _sanitize_shape(s, shapes, cut_ids):
+    if s.get("type") == "line":
+        shapes.append({
+            "id": _safe_id(s.get("id")),
+            "type": "line",
+            **{k: _number(s.get(k)) for k in ("x1", "y1", "x2", "y2")},
+            "stroke": _stroke(s.get("stroke"), False),
+        })
+    elif s.get("type") == "rect":
+        # pts があるコマは多角形（三角・台形・平行四辺形など）。x, y, w, h はその外枠で、画像は外枠に合わせて置き、多角形で切り抜く
+        pts = _panel_points(s.get("pts"))
+        if pts:
+            xs, ys = [p[0] for p in pts], [p[1] for p in pts]
+            box = {"x": min(xs), "y": min(ys), "w": round(max(xs) - min(xs), 1), "h": round(max(ys) - min(ys), 1)}
+        else:
+            box = {k: _number(s.get(k)) for k in ("x", "y", "w", "h")}
+        if box["w"] < 1 or box["h"] < 1:
+            return
+        shapes.append({
+            "id": _safe_id(s.get("id")),
+            "type": "rect",
+            **box,
+            **({"pts": pts} if pts else {}),
+            "stroke": _stroke(s.get("stroke"), True),
+            # 重なったとき、この四角で後ろのコマ（画像と線）を隠す
+            **({"front": True} if s.get("front") is True else {}),
+            # このコマ用として対応させたカット案（画像を選ぶとき、そのカット案から始める）。なくなったカット案は外す
+            **_panel_cut(s.get("cut"), cut_ids),
+            "image": _sanitize_panel_image(s.get("image"), cut_ids),
+        })
+    elif s.get("type") == "material":
+        # 素材（吹き出し・集中線・小物など）。コマと線の上の層に、並び順（後ろほど手前）に置く。ページから一部はみ出してよい
+        name = str(s.get("name", ""))
+        w, h = _number(s.get("w")), _number(s.get("h"))
+        if not re.fullmatch(MATERIAL_NAME, name) or w < 1 or h < 1:
+            return
+        shapes.append({
+            "id": _safe_id(s.get("id")),
+            "type": "material",
+            "name": name,
+            "x": _number(s.get("x")),
+            "y": _number(s.get("y")),
+            "w": w,
+            "h": h,
+        })
+    elif s.get("type") == "text":
+        text = _sanitize_text(s)
+        if text:
+            shapes.append(text)
+    elif s.get("type") == "hline":
+        # 手描き線。形は始点・終点・太さ・揺れ・種で決まり、ブラウザで描く。書き出しには、ブラウザで描いた画像（name）を
+        # x, y, w, h の枠に置く（オノマトペと同じ）。素材と同じ層に、並び順に重ねる
+        name = str(s.get("name", ""))
+        outline = int(_ranged(s.get("outline"), *HLINE_OUTLINE, 0))
+        shapes.append({
+            "id": _safe_id(s.get("id")),
+            "type": "hline",
+            **{k: _number(s.get(k)) for k in ("x1", "y1", "x2", "y2", "x", "y", "w", "h")},
+            "width": int(_ranged(s.get("width"), *HLINE_WIDTH, 12)),
+            "wobble": int(_ranged(s.get("wobble"), *HLINE_WOBBLE, 30)),
+            "color": _color(s.get("color"), "#000000"),
+            "outline": outline,
+            "outlineColor": _color(s.get("outlineColor"), "#ffffff"),
+            "seed": _shape_seed(s.get("seed")),
+            # 蛇行（終わりのほうのくねり）。大きさ・始まる位置（%）・波の数
+            "snake": int(_ranged(s.get("snake"), *HLINE_SNAKE, 0)),
+            "snakeFrom": int(_ranged(s.get("snakeFrom"), *HLINE_SNAKE_FROM, 80)),
+            "snakeWaves": int(_ranged(s.get("snakeWaves"), *HLINE_SNAKE_WAVES, 3)),
+            # 始点・終点を細くするか（入り・抜き）
+            "taperIn": s.get("taperIn") is not False,
+            "taperOut": s.get("taperOut") is not False,
+            "name": name if re.fullmatch(MATERIAL_NAME, name) else "",
+            **({"key": str(s.get("key"))[:64]} if s.get("key") else {}),
+        })
+    elif s.get("type") == "sfx":
+        # オノマトペ。形は params で決まり、ブラウザで描く。書き出しには、ブラウザで描いた画像（素材と同じ置き場所の name）を使う。
+        # 素材と同じ層に、並び順に重ねる
+        params = sanitize_sfx_params(s.get("params"))
+        name = str(s.get("name", ""))
+        w, h = _number(s.get("w")), _number(s.get("h"))
+        if params is None or w < 1 or h < 1:
+            return
+        shapes.append({
+            "id": _safe_id(s.get("id")),
+            "type": "sfx",
+            "name": name if re.fullmatch(MATERIAL_NAME, name) else "",
+            **({"key": str(s.get("key"))[:64]} if s.get("key") else {}),
+            "x": _number(s.get("x")),
+            "y": _number(s.get("y")),
+            "w": w,
+            "h": h,
+            "params": params,
+            **_balloon(s.get("balloon")),
+        })
 
 
 # セリフ（文字）。素材の上の層に置く。x, y, w, h は画面で組んだときの枠で、書き出しでは枠の中心に合わせて組み直す。

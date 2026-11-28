@@ -1579,6 +1579,16 @@
                     BALLOON_STROKES.map((w) => el("option", {value: String(w), text: `線 ${w} px`}))),
                 ]),
             ]),
+            el("div", {class: "ps-pg-sfx-balloon ps-pg-sfx-groupbox"}, [
+                el("div", {class: "ps-pg-sfx-row"}, [
+                    el("button", {type: "button", class: "mtm-btn ps-pg-sfx-group-pick", text: "🔗 まとめる",
+                        title: "押したあと、ほかのオノマトペ・手描き線・素材を押すと、このオノマトペとひとまとまりにします（もう一度押すと外します）。まとめた図形は、どれか 1 つをドラッグや矢印キーで動かすと一緒に動きます。Shift+クリックでも入れる・外すができます",
+                        onclick: () => toggleGroupPick()}),
+                    el("button", {type: "button", class: "mtm-btn ps-pg-sfx-ungroup", text: "まとめを解く",
+                        title: "このオノマトペの入っているまとめを、すべて解きます", onclick: () => ungroup()}),
+                ]),
+                el("div", {class: "ps-pg-sfx-balloon-info ps-pg-sfx-group-info"}),
+            ]),
             el("div", {class: "ps-pg-sfx-glyph"}, [
                 el("div", {class: "ps-pg-sfx-row"}, [
                     el("button", {type: "button", class: "mtm-btn ps-pg-sfx-glyphmode", text: "✥ 字を 1 つずつ直す",
@@ -1994,6 +2004,13 @@
         const hasBalloon = !!s.balloon;
         q(".ps-pg-sfx-balloon-toggle").classList.toggle("mtm-active", hasBalloon);
         q(".ps-pg-sfx-balloon-round").classList.toggle("mtm-active", hasBalloon && !!s.balloon.round);
+        // まとめ
+        const mates = groupMates(s).length;
+        q(".ps-pg-sfx-group-pick").classList.toggle("mtm-active", groupPick);
+        q(".ps-pg-sfx-ungroup").disabled = !mates;
+        q(".ps-pg-sfx-group-info").textContent = groupPick
+            ? "ほかの図形を押すと、まとめに入れる・外す（Esc で終わる）"
+            : mates ? `ほか ${mates} 個とまとめています（一緒に動きます）` : "";
         const bedit = q(".ps-pg-sfx-balloon-edit");
         bedit.disabled = !hasBalloon;
         bedit.classList.toggle("mtm-active", hasBalloon && balloonEdit);
@@ -2280,6 +2297,7 @@
     function change(fn) {
         const before = snapshot();
         fn();
+        tidyGroups();
         if (snapshot() === before) return;
         pushUndo(before);
         commit();
@@ -2341,9 +2359,89 @@
         if (ed.sel !== id) {
             activeVertex = activeGlyph = activeBalloonVertex = -1;
             balloonEdit = false;
+            groupPick = false;
         }
         ed.sel = id;
         render();
+    }
+
+    // ---------- まとめ（グループ） ----------
+    // 同じ group の図形（オノマトペ・手描き線・素材・セリフ）は、1 つをドラッグや矢印キーで動かすと一緒に動く。
+    // オノマトペを選んで「🔗 まとめる」のあと（または Shift+クリックで）ほかの図形を押すと、まとめに入れる・外す。
+    // 1 つしか残らないまとめは外す（サーバーの保存も同じ）
+    const GROUPABLE = ["sfx", "hline", "material", "text"];
+    let groupPick = false;      // 押した図形をまとめに入れる・外すか
+
+    const groupMates = (s) => (s && s.group ? ed.page.shapes.filter((x) => x !== s && x.group === s.group) : []);
+    // 点の並びを m だけ広げた外枠 {x, y, w, h}
+    const boundsBox = (pts, m = 0) => {
+        const b = boundsOf(pts);
+        return {x: b.l - m, y: b.t - m, w: b.r - b.l + 2 * m, h: b.b - b.t + 2 * m};
+    };
+
+    function tidyGroups() {
+        const count = new Map();
+        for (const s of ed.page.shapes) if (s.group) count.set(s.group, (count.get(s.group) || 0) + 1);
+        for (const s of ed.page.shapes) if (s.group && !(count.get(s.group) >= 2 && GROUPABLE.includes(s.type))) delete s.group;
+    }
+
+    // 選んだオノマトペのまとめに、押した図形を入れる・外す。押した図形が別のまとめに入っていれば、そのまとめごと合わせる
+    function toggleGroupMember(id) {
+        const s = selected(), t = shapeOf(id);
+        if (!s || !t || t === s || !GROUPABLE.includes(t.type)) return;
+        change(() => {
+            if (s.group && t.group === s.group) {
+                delete t.group;
+                return;
+            }
+            const g = s.group || newId();
+            s.group = g;
+            if (t.group) {
+                const other = t.group;
+                for (const x of ed.page.shapes) if (x.group === other) x.group = g;
+            } else {
+                t.group = g;
+            }
+        });
+    }
+
+    function toggleGroupPick() {
+        const s = selected();
+        groupPick = !groupPick && !!(s && s.type === "sfx");
+        render();
+    }
+
+    function ungroup() {
+        const s = selected();
+        if (!s || !s.group) return;
+        groupPick = false;
+        change(() => {
+            for (const x of groupMates(s)) delete x.group;
+            delete s.group;
+        });
+    }
+
+    // 図形を、元の位置 o から dx, dy だけずらす（まとめで一緒に動かすとき）
+    function shiftShape(s, o, dx, dy) {
+        if (floating(s)) {
+            placeMaterial(s, o.x + dx, o.y + dy);
+        } else if (s.type === "hline") {
+            Object.assign(s, {
+                x1: round1(o.x1 + dx), y1: round1(o.y1 + dy), x2: round1(o.x2 + dx), y2: round1(o.y2 + dy),
+                x: round1(o.x + dx), y: round1(o.y + dy),
+            });
+        }
+    }
+
+    // 動かした図形 s（元は o）と同じだけ、まとめのほかの図形（元は origs）を動かす
+    function followGroup(s, o, origs) {
+        if (!origs || !origs.length) return;
+        const dx = floating(s) ? s.x - o.x : s.x1 - o.x1;
+        const dy = floating(s) ? s.y - o.y : s.y1 - o.y1;
+        for (const m of origs) {
+            const x = shapeOf(m.id);
+            if (x) shiftShape(x, m, dx, dy);
+        }
     }
 
     // 頂点の編集。オンの間は、選んだコマの角に丸いつまみを出す（外枠の大きさを変えるつまみの代わり）
@@ -2658,6 +2756,11 @@
 
     function drawSelection(s, u) {
         const g = svgEl("g", {class: "ps-pg-sel"});
+        // まとめのほかの図形は、薄い点線で囲む
+        for (const m of groupMates(s)) {
+            const b = m.type === "text" ? textBox(m) : m.type === "hline" ? boundsBox(hlineOutline(m)) : m;
+            g.appendChild(svgEl("rect", {x: b.x, y: b.y, width: b.w, height: b.h, class: "ps-pg-sel-outline ps-pg-group-mate"}));
+        }
         const handle = (name, x, y) => svgEl("rect", {
             x: x - HANDLE * u / 2, y: y - HANDLE * u / 2, width: HANDLE * u, height: HANDLE * u,
             "data-handle": name, class: "ps-pg-handle ps-pg-handle-" + name,
@@ -2760,11 +2863,11 @@
     // ---------- 操作 ----------
 
     // 吸着先。ページの端と中央、ほかの図形の端（動かしている図形は除く）
-    function snapTargets(exceptId) {
+    function snapTargets(exceptId, exceptIds = []) {
         const xs = [0, ed.page.width / 2, ed.page.width];
         const ys = [0, ed.page.height / 2, ed.page.height];
         for (const s of ed.page.shapes) {
-            if (s.id === exceptId) continue;
+            if (s.id === exceptId || exceptIds.includes(s.id)) continue;
             if (boxy(s)) {
                 xs.push(s.x, s.x + s.w);
                 ys.push(s.y, s.y + s.h);
@@ -2878,6 +2981,11 @@
                     }
                     render();
                 }
+            } else if (hit && (groupPick || e.shiftKey) && selected() && selected().type === "sfx" && hit.dataset.id !== ed.sel) {
+                // まとめに入れる・外す（選んだオノマトペはそのまま）
+                drag = null;
+                toggleGroupMember(hit.dataset.id);
+                return;
             } else if (hit) {
                 drag.kind = "move";
                 drag.id = hit.dataset.id;
@@ -2886,6 +2994,7 @@
                 if ((e.ctrlKey || e.metaKey) && src && src.type === "sfx") {
                     // Ctrl を押しながらドラッグで複製する。複製をいちばん手前に足して、それを動かす（動かさなければ足さない）
                     const copy = {...JSON.parse(JSON.stringify(src)), id: newId()};
+                    delete copy.group;      // 複製はまとめに入れない（元のまとめは動かさない）
                     ed.page.shapes.push(copy);
                     drag.dupOf = src.id;
                     drag.id = copy.id;
@@ -2898,7 +3007,9 @@
                 return;
             }
             drag.orig = {...shapeOf(drag.id)};
-            drag.targets = snapTargets(drag.id);
+            // まとめのほかの図形も一緒に動かす。一緒に動く図形には吸着しない
+            drag.mates = drag.kind === "move" ? groupMates(shapeOf(drag.id)).map((m) => ({...m})) : [];
+            drag.targets = snapTargets(drag.id, drag.mates.map((m) => m.id));
         }
         svg.setPointerCapture(e.pointerId);
     }
@@ -2986,6 +3097,7 @@
             dy = clamp(dy, -minY, ed.page.height - maxY);
             Object.assign(s, {x1: round1(o.x1 + dx), y1: round1(o.y1 + dy), x2: round1(o.x2 + dx), y2: round1(o.y2 + dy)});
         }
+        followGroup(s, o, drag.mates);
     }
 
     function dragHandle(p, shift) {
@@ -3197,8 +3309,11 @@
             return;
         }
         change(() => {
+            const o = {...s};
+            const mates = groupMates(s).map((m) => ({...m}));
             if (floating(s)) {
                 placeMaterial(s, s.x + dx, s.y + dy);
+                followGroup(s, o, mates);
             } else if (s.type === "rect" && vertexMode && activeVertex >= 0) {
                 // 頂点の編集中は、最後に触った頂点だけを動かす
                 const p = cornersOf(s)[activeVertex];
@@ -3214,6 +3329,7 @@
                 dx = clamp(dx, -minX, ed.page.width - maxX);
                 dy = clamp(dy, -minY, ed.page.height - maxY);
                 Object.assign(s, {x1: s.x1 + dx, y1: s.y1 + dy, x2: s.x2 + dx, y2: s.y2 + dy});
+                if (s.type === "hline") followGroup(s, o, mates);
             }
         });
     }
@@ -3242,6 +3358,7 @@
             else if (drag) cancelDrag();
             else if (typing) e.target.blur();
             else if (prefs.tool === "sfx") setTool("select");
+            else if (groupPick) toggleGroupPick();
             else if (balloonEdit) toggleBalloonEdit();
             else if (ed.sel) select(null);
             else close();

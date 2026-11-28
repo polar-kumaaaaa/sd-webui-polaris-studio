@@ -3261,6 +3261,12 @@ body.mtm-fs-open {
     opacity: 0.4;
 }
 
+/* 選んだ図形とまとめている、ほかの図形 */
+.ps-pg-group-mate {
+    stroke-dasharray: 3 4;
+    opacity: 0.7;
+}
+
 /* フキダシの選択。外枠のつまみは菱形（持ち主のつまみと見分ける） */
 .ps-pg-balloon-outline {
     stroke-dasharray: 6 4;
