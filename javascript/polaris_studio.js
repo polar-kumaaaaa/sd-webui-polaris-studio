@@ -648,7 +648,7 @@
     // sd-webui-prompt-dictionary が txt2img に置くパネルを、開いている間だけ編集画面の右に移す。閉じたら元の場所に戻す
 
     const DICT_KEY = "polaris-studio:dict-open";
-    let dictHome = null;            // 移す前の {parent, next, wasOpen}。null なら移していない
+    let dictHome = null;            // 移す前の {holder, id, wasOpen}。null なら移していない
     let lastPromptArea = null;      // 「挿入」を入れるプロンプト欄（最後にカーソルを置いた方）
 
     function dictPanel() {
@@ -660,7 +660,14 @@
         const panel = dictPanel();
         if (!panel || dictHome) return;
         const body = panel.querySelector(".pd-inline-body");
-        dictHome = {parent: panel.parentNode, next: panel.nextSibling, wasOpen: !!body && !body.hidden};
+        // 大辞典は UI が変わるたびに、同じ id のパネルを元の場所へ置き直す（Neo ではすぐ連れ戻される）。
+        // そこで元の場所には同じ id の空の目印を置き、借りている間はパネルの id を変えておく
+        const holder = document.createElement("div");
+        holder.id = panel.id;
+        holder.hidden = true;
+        panel.parentNode.insertBefore(holder, panel);
+        dictHome = {holder, id: panel.id, wasOpen: !!body && !body.hidden};
+        panel.id = panel.id + "_polaris";
         fq(".ps-ed-dict-body").appendChild(panel);
         // 折りたたんであれば開く（大辞典の見出しのボタンで開け閉めする）
         if (body && body.hidden) panel.querySelector(".pd-inline-head").click();
@@ -680,8 +687,10 @@
         if (panel) {
             const body = panel.querySelector(".pd-inline-body");
             if (!dictHome.wasOpen && body && !body.hidden) panel.querySelector(".pd-inline-head").click();
-            if (dictHome.parent && dictHome.parent.isConnected) dictHome.parent.insertBefore(panel, dictHome.next && dictHome.next.parentNode === dictHome.parent ? dictHome.next : null);
+            panel.id = dictHome.id;
+            if (dictHome.holder.isConnected) dictHome.holder.replaceWith(panel);
         }
+        dictHome.holder.remove();
         dictHome = null;
         fq(".ps-ed-dict").classList.add("ps-off");
         fq(".ps-editor").classList.remove("ps-dict-open");
