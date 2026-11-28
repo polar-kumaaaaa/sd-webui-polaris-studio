@@ -832,6 +832,21 @@
         renderCats();
     }
 
+    // すべてのカテゴリを閉じる（並べ替えやすくするため）。つまみを押したカテゴリは画面上の同じ高さに残す
+    function closeAllCats(keepId) {
+        const box = fq(".ps-ed-cats");
+        const find = () => [...box.querySelectorAll(".ps-ed-cat")].find((x) => x.dataset.cat === keepId);
+        const before = find();
+        const offset = before ? before.getBoundingClientRect().top - box.getBoundingClientRect().top : null;
+        fsOpenCats.clear();
+        saveOpenCats();
+        renderCats();
+        const after = find();
+        if (after && offset !== null) {
+            box.scrollTop += after.getBoundingClientRect().top - box.getBoundingClientRect().top - offset;
+        }
+    }
+
     function saveOpenCats() {
         try {
             localStorage.setItem(openCatsKey(), JSON.stringify([...fsOpenCats]));
@@ -1260,6 +1275,13 @@
             if (b.cat) appendCategoryBadges(name, b.cat);
             // 未分類はカテゴリではないので、並べ替えと編集はできない
             const handle = b.cat ? makeHandle() : null;
+            if (handle) {
+                handle.title = "ドラッグで並べ替え / ダブルクリックですべて閉じる";
+                handle.addEventListener("dblclick", (e) => {
+                    e.stopPropagation();
+                    closeAllCats(b.id);
+                });
+            }
             const head = el("div", {class: "ps-ed-cat-head" + (b.cat && b.cat.negative ? " ps-ed-neg" : ""), title: "クリックで開く / 閉じる"}, [
                 ...(handle ? [handle] : []),
                 el("span", {class: "ps-ed-arrow", text: "▶"}),
