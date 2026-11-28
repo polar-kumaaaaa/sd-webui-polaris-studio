@@ -524,7 +524,32 @@ def _balloon(raw):
         stroke = int(raw.get("stroke"))
     except (TypeError, ValueError):
         stroke = 4
-    return {"balloon": {"pts": pts, "stroke": stroke if stroke in BALLOON_STROKES else 4}}
+    balloon = {"pts": pts, "stroke": stroke if stroke in BALLOON_STROKES else 4}
+    if raw.get("round") is True:
+        balloon["round"] = True
+    return {"balloon": balloon}
+
+
+# 丸いフキダシの縁。頂点を角の目安にして、両隣の辺の真ん中を結ぶ 3 次ベジェ曲線でつなぐ（画面の roundOutline と同じ）
+BALLOON_ROUND_K = 0.5523
+
+
+def _round_outline(pts, steps=24):
+    n = len(pts)
+    out = []
+    for i in range(n):
+        v = pts[i]
+        p, q = pts[i - 1], pts[(i + 1) % n]
+        a = ((p[0] + v[0]) / 2, (p[1] + v[1]) / 2)
+        b = ((v[0] + q[0]) / 2, (v[1] + q[1]) / 2)
+        c1 = (a[0] + BALLOON_ROUND_K * (v[0] - a[0]), a[1] + BALLOON_ROUND_K * (v[1] - a[1]))
+        c2 = (b[0] + BALLOON_ROUND_K * (v[0] - b[0]), b[1] + BALLOON_ROUND_K * (v[1] - b[1]))
+        for j in range(steps):
+            t = j / steps
+            u = 1 - t
+            w0, w1, w2, w3 = u * u * u, 3 * u * u * t, 3 * u * t * t, t * t * t
+            out.append((w0 * a[0] + w1 * c1[0] + w2 * c2[0] + w3 * b[0], w0 * a[1] + w1 * c1[1] + w2 * c2[1] + w3 * b[1]))
+    return out
 
 
 def _sanitize_text(s):
@@ -1374,6 +1399,8 @@ def _paste_balloon(canvas, s):
         return
     cx, cy = s["x"] + s["w"] / 2, s["y"] + s["h"] / 2
     pts = [(cx + dx, cy + dy) for dx, dy in balloon["pts"]]
+    if balloon.get("round"):
+        pts = _round_outline(pts)
     stroke = balloon["stroke"]
     pad = stroke + 2
     x0 = int(min(p[0] for p in pts) - pad)

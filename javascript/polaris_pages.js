@@ -258,7 +258,7 @@
     }
 
     // ---------- フキダシ ----------
-    // セリフとオノマトペに付ける。balloon = {pts: [[dx, dy], ...], stroke}。頂点は持ち主の枠の中心からのずれ（ページのピクセル）なので、
+    // セリフとオノマトペに付ける。balloon = {pts: [[dx, dy], ...], stroke, round}。頂点は持ち主の枠の中心からのずれ（ページのピクセル）なので、
     // 持ち主を動かすとフキダシも一緒に動く。セリフは四角だけ（大きさは文字とは別に変えられる）、オノマトペは頂点を足して多角形にできる。
     // 白で塗り、黒い線（太さ stroke、線の真ん中が頂点を通る）で囲む。持ち主のすぐ下に描く（サーバーの書き出しも同じ）
     const BALLOON_STROKES = [2, 4, 6, 8, 12];
@@ -276,17 +276,57 @@
         s.balloon = {...s.balloon, pts: abs.map((p) => [round1(p[0] - c.x), round1(p[1] - c.y)])};
     }
 
-    // 持ち主の枠を少し広げた四角を作る
-    function newBalloon(s) {
+    // 持ち主の枠を少し広げた四角を作る。丸（round）なら、その四角に収まる楕円が持ち主の枠を囲むよう √2 倍に広げる
+    function newBalloon(s, round = false) {
         const b = s.type === "text" ? textBox(s) : s;
         const m = (s.type === "text" ? s.size : s.params.size) * 0.6;
-        const hw = round1(b.w / 2 + m), hh = round1(b.h / 2 + m);
-        return {pts: [[-hw, -hh], [hw, -hh], [hw, hh], [-hw, hh]], stroke: 4};
+        const k = round ? Math.SQRT2 : 1;
+        const hw = round1((b.w / 2 + m / 2) * k + m / 2), hh = round1((b.h / 2 + m / 2) * k + m / 2);
+        return {pts: [[-hw, -hh], [hw, -hh], [hw, hh], [-hw, hh]], stroke: 4, ...(round ? {round: true} : {})};
+    }
+
+    // 四角と丸を切り替えたとき、同じ外枠の真ん中のまま、中身が収まるように広げ・縮める（四角のままの頂点のときだけ）
+    function rescaleForRound(s, round) {
+        const pts = s.balloon.pts;
+        if (pts.length !== 4 || !isAxisRect(pts)) return;
+        const bb = boundsOf(pts);
+        const cx = (bb.l + bb.r) / 2, cy = (bb.t + bb.b) / 2;
+        const k = round ? Math.SQRT2 : Math.SQRT1_2;
+        s.balloon = {...s.balloon, pts: pts.map((p) => [round1(cx + (p[0] - cx) * k), round1(cy + (p[1] - cy) * k)])};
+    }
+
+    // 丸いフキダシ（balloon.round）は、頂点を角の目安にして、辺の真ん中を通るなめらかな線で囲む。
+    // 角ごとに、両隣の辺の真ん中を結ぶ 3 次ベジェ曲線（制御点は辺の真ん中から頂点へ ROUND_K の所）。四角ならほぼ楕円になる。
+    // 線は頂点を結んだ多角形の内側に収まる。描くときは細かい点の並びにする（サーバーの書き出しも同じ）
+    const ROUND_K = 0.5523;
+    const ROUND_STEPS = 12;
+
+    function roundOutline(pts) {
+        const n = pts.length, out = [];
+        const mid = (a, b) => [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
+        const toward = (a, v) => [a[0] + ROUND_K * (v[0] - a[0]), a[1] + ROUND_K * (v[1] - a[1])];
+        for (let i = 0; i < n; i++) {
+            const v = pts[i];
+            const a = mid(pts[(i - 1 + n) % n], v), b = mid(v, pts[(i + 1) % n]);
+            const c1 = toward(a, v), c2 = toward(b, v);
+            for (let j = 0; j < ROUND_STEPS; j++) {
+                const t = j / ROUND_STEPS, u = 1 - t;
+                const w0 = u * u * u, w1 = 3 * u * u * t, w2 = 3 * u * t * t, w3 = t * t * t;
+                out.push([round1(w0 * a[0] + w1 * c1[0] + w2 * c2[0] + w3 * b[0]), round1(w0 * a[1] + w1 * c1[1] + w2 * c2[1] + w3 * b[1])]);
+            }
+        }
+        return out;
+    }
+
+    // フキダシの縁（ページの座標の点の並び）
+    function balloonOutline(s) {
+        const pts = balloonPts(s);
+        return s.balloon.round ? roundOutline(pts) : pts;
     }
 
     function drawBalloon(parent, s) {
         parent.appendChild(svgEl("polygon", {
-            points: pointsAttr(balloonPts(s)), fill: "#fff", stroke: "#000", "stroke-width": s.balloon.stroke, "stroke-linejoin": "round",
+            points: pointsAttr(balloonOutline(s)), fill: "#fff", stroke: "#000", "stroke-width": s.balloon.stroke, "stroke-linejoin": "round",
         }));
     }
 
@@ -1520,6 +1560,9 @@
                 el("div", {class: "ps-pg-sfx-row"}, [
                     el("button", {type: "button", class: "mtm-btn ps-pg-sfx-balloon-toggle", text: "□ フキダシ",
                         title: "このオノマトペにフキダシ（白地に黒い線）を付ける・外す (B)", onclick: () => toggleBalloon()}),
+                    el("button", {type: "button", class: "mtm-btn ps-pg-sfx-balloon-round", text: "○ 丸く",
+                        title: "フキダシを丸くする・角に戻す。頂点は角の目安になり、辺の真ん中を通るなめらかな線で囲みます（四角なら楕円）。フキダシがなければ丸いフキダシを付けます (Shift+B)",
+                        onclick: () => toggleBalloonRound()}),
                     el("button", {type: "button", class: "mtm-btn ps-pg-sfx-balloon-edit", text: "頂点を編集",
                         title: "フキダシの頂点を動かします。辺の真ん中の丸をドラッグで頂点を足し（20 個まで）、頂点をダブルクリックで消します。矢印キーで最後に触った頂点を 1 px（Shift で 10 px）",
                         onclick: () => toggleBalloonEdit()}),
@@ -1950,11 +1993,15 @@
         // フキダシ
         const hasBalloon = !!s.balloon;
         q(".ps-pg-sfx-balloon-toggle").classList.toggle("mtm-active", hasBalloon);
+        q(".ps-pg-sfx-balloon-round").classList.toggle("mtm-active", hasBalloon && !!s.balloon.round);
         const bedit = q(".ps-pg-sfx-balloon-edit");
         bedit.disabled = !hasBalloon;
         bedit.classList.toggle("mtm-active", hasBalloon && balloonEdit);
         q(".ps-pg-sfx-balloon-dice").disabled = !hasBalloon;
-        q(".ps-pg-sfx-balloon-square").disabled =!hasBalloon || s.balloon.pts.length === 4 && isAxisRect(s.balloon.pts);
+        const square = q(".ps-pg-sfx-balloon-square");
+        square.disabled = !hasBalloon || s.balloon.pts.length === 4 && isAxisRect(s.balloon.pts);
+        square.textContent = hasBalloon && s.balloon.round ? "楕円に戻す" : "四角に戻す";
+        square.title = hasBalloon && s.balloon.round ? "フキダシを今の外枠に収まる楕円に戻します" : "フキダシを今の外枠の四角に戻します";
         q(".ps-pg-sfx-balloon-more").classList.toggle("ps-off", !hasBalloon);
         if (hasBalloon) {
             const stroke = q(".ps-pg-sfx-balloon-stroke");
@@ -2322,6 +2369,25 @@
         });
     }
 
+    // フキダシを丸くする・角に戻す（オノマトペ）。フキダシがなければ丸いフキダシを付ける
+    function toggleBalloonRound() {
+        const s = selected();
+        if (!s || s.type !== "sfx") return;
+        change(() => {
+            if (!s.balloon) {
+                s.balloon = newBalloon(s, true);
+                return;
+            }
+            const round = !s.balloon.round;
+            rescaleForRound(s, round);
+            if (round) s.balloon = {...s.balloon, round: true};
+            else {
+                const {round: _, ...rest} = s.balloon;
+                s.balloon = rest;
+            }
+        });
+    }
+
     function setBalloonStroke(w) {
         const s = selected();
         if (!s || !s.balloon || !BALLOON_STROKES.includes(w)) return;
@@ -2566,7 +2632,7 @@
         }
         // 素材はいちばん上の層なので、クリックもいちばん手前で受ける
         // フキダシは持ち主のすぐ下で受ける（押すと持ち主を選ぶ）
-        const balloonHit = (s) => s.balloon && hits.appendChild(svgEl("polygon", {points: pointsAttr(balloonPts(s)), "data-id": s.id}));
+        const balloonHit = (s) => s.balloon && hits.appendChild(svgEl("polygon", {points: pointsAttr(balloonOutline(s)), "data-id": s.id}));
         for (const s of page.shapes) {
             // 手描き線は輪郭で受ける。細い線も掴めるよう、周りに太めの縁を足す
             if (s.type === "hline") {
@@ -2599,7 +2665,11 @@
         // フキダシ。頂点の編集中（オノマトペ）は頂点の丸と、辺の真ん中の「頂点を足す」丸。でなければ外枠の 8 つのつまみ（菱形）
         if (s.balloon && (s.type === "text" || s.type === "sfx")) {
             const pts = balloonPts(s);
-            g.appendChild(svgEl("polygon", {points: pointsAttr(pts), class: "ps-pg-sel-outline ps-pg-balloon-outline"}));
+            g.appendChild(svgEl("polygon", {points: pointsAttr(balloonOutline(s)), class: "ps-pg-sel-outline ps-pg-balloon-outline"}));
+            // 丸いフキダシの頂点の編集中は、頂点を結んだ線も薄く出す（どの頂点がどこを引っぱるか分かるように）
+            if (balloonEdit && s.type === "sfx" && s.balloon.round) {
+                g.appendChild(svgEl("polygon", {points: pointsAttr(pts), class: "ps-pg-sel-outline ps-pg-balloon-outline ps-pg-sel-faint"}));
+            }
             if (balloonEdit && s.type === "sfx") {
                 pts.forEach((p, i) => {
                     const n = pts[(i + 1) % pts.length];
@@ -3223,6 +3293,9 @@
         } else if (key === "g" && selected() && selected().type === "hline") {
             stop();
             rerollHline();
+        } else if (key === "b" && e.shiftKey && selected() && selected().type === "sfx") {
+            stop();
+            toggleBalloonRound();
         } else if (key === "b" && selected() && (selected().type === "text" || selected().type === "sfx")) {
             stop();
             toggleBalloon();
